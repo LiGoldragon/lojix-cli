@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "lojix_cli_v2",
+  "project_id": "fe34257f-beb6-42ef-b519-41dc865b5eb9"
+}
