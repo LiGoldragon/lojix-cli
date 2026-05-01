@@ -1,0 +1,93 @@
+use std::path::{Path, PathBuf};
+
+use horizon_lib::ClusterProposal;
+
+use crate::error::{Error, Result};
+
+#[derive(Debug, Clone)]
+pub struct ProposalSource(PathBuf);
+
+impl ProposalSource {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self(path.into())
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn load(&self) -> Result<ClusterProposal> {
+        let bytes = std::fs::read_to_string(&self.0)?;
+        let mut decoder = nota_codec::Decoder::nota(&bytes);
+        Ok(<ClusterProposal as nota_codec::NotaDecode>::decode(&mut decoder)?)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FlakeRef(String);
+
+impl FlakeRef {
+    pub fn new(uri: impl Into<String>) -> Self {
+        Self(uri.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OverrideUri(String);
+
+impl OverrideUri {
+    pub fn from_local_path(path: &Path) -> Self {
+        Self(format!("path:{}", path.display()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NarHashSri(String);
+
+impl NarHashSri {
+    pub fn try_new(s: impl Into<String>) -> Result<Self> {
+        let s = s.into();
+        if s.starts_with("sha256-") {
+            Ok(Self(s))
+        } else {
+            Err(Error::InvalidName { kind: "NarHashSri (must start with sha256-)", got: s })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A `/nix/store/...` path. Constructed from the stdout of `nix
+/// build --print-out-paths`; rejected if the prefix doesn't match
+/// (catches accidental whitespace, multi-line output, etc.).
+#[derive(Debug, Clone)]
+pub struct StorePath(String);
+
+impl StorePath {
+    pub fn try_new(s: impl Into<String>) -> Result<Self> {
+        let s = s.into();
+        let trimmed = s.trim();
+        if trimmed.starts_with("/nix/store/") && !trimmed.contains('\n') {
+            Ok(Self(trimmed.to_string()))
+        } else {
+            Err(Error::InvalidName {
+                kind: "StorePath (must start with /nix/store/ and be one line)",
+                got: s,
+            })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}

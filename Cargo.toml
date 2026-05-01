@@ -1,0 +1,21 @@
+[package]
+name    = "lojix-cli-v2"
+version = "0.1.0"
+edition = "2024"
+description = "lojix-cli-v2 — forked development repo for the next generation of the CriomOS deploy CLI."
+license-file = "LICENSE.md"
+
+[[bin]]
+name = "lojix-cli-v2"
+path = "src/main.rs"
+
+[dependencies]
+horizon-lib = { git = "https://github.com/LiGoldragon/horizon-rs" }
+nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git" }
+ractor      = "0.13"
+tokio       = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
+clap        = { version = "4", features = ["derive"] }
+thiserror   = "2"
+tempfile    = "3"
+serde_json  = "1"
+process-wrap = { version = "9.1.0", features = ["tokio1", "process-group", "kill-on-drop"] }
