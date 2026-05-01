@@ -8,7 +8,7 @@ repo-specific carve-out only.
 Run `bd list --status open` to see what's already on the table.
 The active design context starts with:
 
-- `~/git/workspace/reports/124-lojix-cli-v2-full-work-survey-and-reading-order-2026-05-01.md`
+- `~/git/lojix-cli-v2/reports/0001-full-work-survey-and-reading-order.md`
 - `~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`
 
 ## Scope
