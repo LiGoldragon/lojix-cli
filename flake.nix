@@ -1,5 +1,5 @@
 {
-  description = "lojix-cli-v2 — forked development repo for the next generation of the CriomOS deploy CLI.";
+  description = "Forked development repo for the next generation of the CriomOS deploy CLI.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
@@ -56,10 +56,10 @@
             inherit (ctx) cargoArtifacts;
             # pname must match Cargo.toml's [[bin]] name so `nix run`
             # finds bin/<pname>.
-            pname = "lojix-cli-v2";
-            meta.mainProgram = "lojix-cli-v2";
+            pname = "lojix-cli";
+            meta.mainProgram = "lojix-cli";
             # Skip the test phase: tests/eval.rs uses
-            # env!("CARGO_BIN_EXE_lojix-cli-v2") which is only set at
+            # env!("CARGO_BIN_EXE_lojix-cli") which is only set at
             # cargo-test-runtime, not compile-time. Tests still run via
             # `nix build .#checks.<system>.default` which uses
             # craneLib.cargoTest (different test invocation).

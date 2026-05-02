@@ -9,7 +9,7 @@ use crate::cluster::{FlakeRef, OverrideUri, StorePath};
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
 pub enum BuildAction {
     Eval,
     Build,
@@ -33,10 +33,7 @@ impl BuildAction {
     pub fn activates(self) -> bool {
         matches!(
             self,
-            BuildAction::Boot
-                | BuildAction::Switch
-                | BuildAction::Test
-                | BuildAction::BootOnce,
+            BuildAction::Boot | BuildAction::Switch | BuildAction::Test | BuildAction::BootOnce,
         )
     }
 }
@@ -128,7 +125,10 @@ impl NixBuild {
                     None => BuildLocation::Dispatcher,
                     Some(target) => BuildLocation::Builder(target.clone()),
                 };
-                Ok(BuildPhaseOutcome::BuildDone { store_path, location })
+                Ok(BuildPhaseOutcome::BuildDone {
+                    store_path,
+                    location,
+                })
             }
         }
     }

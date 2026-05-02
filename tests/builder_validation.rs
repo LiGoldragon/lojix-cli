@@ -1,12 +1,13 @@
-//! Builder-validation integration tests. Asserts that
-//! `--builder <bogus>` fails *before* any nix invocation with a
-//! specific, human-actionable error — not a TCP timeout deep in
-//! the build phase.
+//! Builder-validation integration tests. Asserts that a bogus
+//! builder in the Nota request fails *before* any nix invocation
+//! with a specific, human-actionable error — not a TCP timeout
+//! deep in the build phase.
 
 use std::path::PathBuf;
 use std::process::Command;
 
 const GOLDRAGON_NOTA: &str = "/home/li/git/goldragon/datom.nota";
+const CRIOMOS_PATH: &str = "path:/home/li/git/CriomOS";
 
 fn skip_if_no_datom() -> bool {
     if !PathBuf::from(GOLDRAGON_NOTA).exists() {
@@ -16,6 +17,17 @@ fn skip_if_no_datom() -> bool {
     false
 }
 
+fn eval_request_arguments(node: &str, builder: &str) -> Vec<String> {
+    vec![
+        "(Eval".to_string(),
+        "goldragon".to_string(),
+        node.to_string(),
+        format!("\"{GOLDRAGON_NOTA}\""),
+        format!("\"{CRIOMOS_PATH}\""),
+        format!("{builder})"),
+    ]
+}
+
 #[test]
 fn unknown_builder_fails_with_unknown_builder_error() {
     if skip_if_no_datom() {
@@ -23,22 +35,10 @@ fn unknown_builder_fails_with_unknown_builder_error() {
     }
     // tiger is a real cluster member; "definitely-not-a-node" is
     // not. Validation should fail at horizon-resolution time.
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli-v2"))
-        .args([
-            "eval",
-            "--cluster",
-            "goldragon",
-            "--node",
-            "tiger",
-            "--source",
-            GOLDRAGON_NOTA,
-            "--criomos",
-            "path:/home/li/git/CriomOS",
-            "--builder",
-            "definitely-not-a-node",
-        ])
+    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+        .args(eval_request_arguments("tiger", "definitely-not-a-node"))
         .output()
-        .expect("spawn lojix-cli-v2");
+        .expect("spawn lojix-cli");
 
     assert!(
         !out.status.success(),
@@ -61,29 +61,17 @@ fn builder_equals_node_resolves_against_viewpoint_node() {
     if skip_if_no_datom() {
         return;
     }
-    // `--node prometheus --builder prometheus` is the "build on
-    // the target itself" case (per reports/0033 decision 4). The
+    // A request with node=prometheus and builder=prometheus is the
+    // "build on the target itself" case (per reports/0033 decision 4). The
     // viewpoint node sits in `horizon.node`, not `horizon.ex_nodes`,
     // so this must resolve there. We only run `eval` so no real
     // ssh occurs — successful exit means resolution + projection
     // both worked. prom is `is_builder=true` per goldragon's
     // datom (LargeAiRouter, size=Max, trust=Max, base pubkeys).
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli-v2"))
-        .args([
-            "eval",
-            "--cluster",
-            "goldragon",
-            "--node",
-            "prometheus",
-            "--source",
-            GOLDRAGON_NOTA,
-            "--criomos",
-            "path:/home/li/git/CriomOS",
-            "--builder",
-            "prometheus",
-        ])
+    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+        .args(eval_request_arguments("prometheus", "prometheus"))
         .output()
-        .expect("spawn lojix-cli-v2");
+        .expect("spawn lojix-cli");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     // The eval may fail at the actual ssh step (no live prom in
@@ -110,22 +98,10 @@ fn non_builder_node_fails_with_invalid_builder_error() {
     // species, Min size — fails the size>=med && is_fully_trusted
     // gates in horizon-rs's projection). Validation should reject
     // it specifically, not silently fall back.
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli-v2"))
-        .args([
-            "eval",
-            "--cluster",
-            "goldragon",
-            "--node",
-            "tiger",
-            "--source",
-            GOLDRAGON_NOTA,
-            "--criomos",
-            "path:/home/li/git/CriomOS",
-            "--builder",
-            "balboa",
-        ])
+    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+        .args(eval_request_arguments("tiger", "balboa"))
         .output()
-        .expect("spawn lojix-cli-v2");
+        .expect("spawn lojix-cli");
 
     assert!(
         !out.status.success(),

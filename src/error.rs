@@ -1,4 +1,5 @@
 use horizon_lib::name::NodeName;
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,6 +33,12 @@ pub enum Error {
 
     #[error("invalid {kind}: {got:?}")]
     InvalidName { kind: &'static str, got: String },
+
+    #[error("unexpected command-line argument: {got:?}")]
+    UnexpectedArgument { got: String },
+
+    #[error("no lojix request supplied and no default config file exists; searched {searched:?}")]
+    NoRequestConfig { searched: Vec<PathBuf> },
 
     #[error("HOME env var not set")]
     NoHome,

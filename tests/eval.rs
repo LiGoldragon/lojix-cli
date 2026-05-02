@@ -6,29 +6,21 @@ const CRIOMOS_PATH: &str = "path:/home/li/git/CriomOS";
 
 #[test]
 fn eval_goldragon_tiger_runs_pipeline_to_nix() {
-    if !PathBuf::from(GOLDRAGON_NOTA).exists() {
-        eprintln!("skipping: {GOLDRAGON_NOTA} not present");
+    if skip_local_eval_smoke_test() {
         return;
     }
 
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli-v2"))
-        .args([
-            "eval",
-            "--cluster",
-            "goldragon",
-            "--node",
-            "tiger",
-            "--source",
-            GOLDRAGON_NOTA,
-            "--criomos",
-            CRIOMOS_PATH,
-        ])
+    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+        .args(eval_request_arguments())
         .output()
         .expect("spawn lojix");
 
     let stderr = String::from_utf8_lossy(&out.stderr);
 
-    let horizon_dir = dirs_cache_lojix().join("horizon").join("goldragon").join("tiger");
+    let horizon_dir = dirs_cache_lojix()
+        .join("horizon")
+        .join("goldragon")
+        .join("tiger");
     assert!(
         horizon_dir.join("horizon.json").exists(),
         "horizon.json should exist in {horizon_dir:?}; stderr was: {stderr}",
@@ -59,28 +51,22 @@ fn eval_goldragon_tiger_runs_pipeline_to_nix() {
 
 #[test]
 fn eval_is_deterministic_across_runs() {
-    if !PathBuf::from(GOLDRAGON_NOTA).exists() {
-        eprintln!("skipping: {GOLDRAGON_NOTA} not present");
+    if skip_local_eval_smoke_test() {
         return;
     }
 
     let run = || {
-        let _ = Command::new(env!("CARGO_BIN_EXE_lojix-cli-v2"))
-            .args([
-                "eval",
-                "--cluster",
-                "goldragon",
-                "--node",
-                "tiger",
-                "--source",
-                GOLDRAGON_NOTA,
-                "--criomos",
-                CRIOMOS_PATH,
-            ])
+        let _ = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+            .args(eval_request_arguments())
             .output()
             .expect("spawn lojix");
         (
-            nar_hash_of(&dirs_cache_lojix().join("horizon").join("goldragon").join("tiger")),
+            nar_hash_of(
+                &dirs_cache_lojix()
+                    .join("horizon")
+                    .join("goldragon")
+                    .join("tiger"),
+            ),
             nar_hash_of(&dirs_cache_lojix().join("system").join("x86_64-linux")),
         )
     };
@@ -96,6 +82,29 @@ fn eval_is_deterministic_across_runs() {
 fn dirs_cache_lojix() -> PathBuf {
     let home = std::env::var("HOME").expect("HOME set");
     PathBuf::from(home).join(".cache/lojix")
+}
+
+fn eval_request_arguments() -> Vec<String> {
+    vec![
+        "(Eval".to_string(),
+        "goldragon".to_string(),
+        "tiger".to_string(),
+        format!("\"{GOLDRAGON_NOTA}\""),
+        format!("\"{CRIOMOS_PATH}\""),
+        "None)".to_string(),
+    ]
+}
+
+fn skip_local_eval_smoke_test() -> bool {
+    if std::env::var_os("LOJIX_RUN_LOCAL_EVAL_TESTS").is_none() {
+        eprintln!("skipping: set LOJIX_RUN_LOCAL_EVAL_TESTS=1 to run local eval smoke tests");
+        return true;
+    }
+    if !PathBuf::from(GOLDRAGON_NOTA).exists() {
+        eprintln!("skipping: {GOLDRAGON_NOTA} not present");
+        return true;
+    }
+    false
 }
 
 fn nar_hash_of(dir: &std::path::Path) -> String {

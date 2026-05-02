@@ -8,5 +8,6 @@ pub mod error;
 pub mod host;
 pub mod project;
 pub mod proposal;
+pub mod request;
 
 pub use error::{Error, Result};

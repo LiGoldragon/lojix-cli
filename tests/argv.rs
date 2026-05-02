@@ -7,11 +7,11 @@ use std::path::Path;
 
 use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName};
 
-use lojix_cli_v2::activate::{parse_gen_number_from_link, SystemActivation};
-use lojix_cli_v2::build::{BuildAction, BuildLocation, NixBuild};
-use lojix_cli_v2::cluster::{FlakeRef, OverrideUri, StorePath};
-use lojix_cli_v2::copy::ClosureCopy;
-use lojix_cli_v2::host::SshTarget;
+use lojix_cli::activate::{parse_gen_number_from_link, SystemActivation};
+use lojix_cli::build::{BuildAction, BuildLocation, NixBuild};
+use lojix_cli::cluster::{FlakeRef, OverrideUri, StorePath};
+use lojix_cli::copy::ClosureCopy;
+use lojix_cli::host::SshTarget;
 
 fn target_for(node: &str, cluster: &str) -> SshTarget {
     let node = NodeName::try_new(node).unwrap();
@@ -47,7 +47,7 @@ fn nix_build_argv_contains_target_attr_and_overrides() {
 }
 
 #[test]
-fn nix_eval_argv_uses_eval_subcommand_and_drvpath_attr() {
+fn nix_eval_argv_uses_eval_operation_and_drvpath_attr() {
     let argv = nix_build_argv_for(BuildAction::Eval, None);
     assert_eq!(argv[0], "eval");
     assert!(argv.contains(&"--raw".to_string()));

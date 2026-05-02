@@ -1,4 +1,4 @@
-# Agent Bootstrap — lojix-cli-v2
+# Agent Bootstrap — lojix-cli
 
 You **MUST** read `~/git/lore/AGENTS.md` first. This file is the
 repo-specific carve-out only.
@@ -8,13 +8,13 @@ repo-specific carve-out only.
 Run `bd list --status open` to see what's already on the table.
 The active design context starts with:
 
-- `~/git/CriomOS/reports/0039-lojix-cli-v2-full-work-survey-and-reading-order.md`
+- CriomOS report 0039, the full work survey and reading order
 - `~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`
 
 ## Scope
 
-`lojix-cli-v2` is the **safe rewrite fork** of the working
-`lojix-cli`. The original repo remains Li's live deploy tool. This
+This repo is the **safe rewrite fork** of the working `lojix-cli`.
+The original repo remains Li's live deploy tool. This
 repo is where the Nota-native CLI surface, local request/config
 loading, home deploy support, and deeper internal reshaping land.
 
@@ -24,9 +24,9 @@ repo, this one may be restructured aggressively.
 
 Hard boundary:
 
-- do not edit `~/git/lojix-cli/` as part of v2 work;
+- do not edit the live `~/git/lojix-cli/` repo as part of fork work;
 - land exploratory or breaking redesign work here first;
-- only backport intentionally once v2 has a verified shape.
+- only backport intentionally once this fork has a verified shape.
 
 ## Architecture
 

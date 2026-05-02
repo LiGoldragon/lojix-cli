@@ -1,5 +1,5 @@
-use horizon_lib::Viewpoint;
 use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::Viewpoint;
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
@@ -49,7 +49,10 @@ impl DeployState {
         let proposal = unwrap_call(
             self.proposal_reader
                 .call(
-                    |reply| ProposalMsg::Read { source: request.source, reply },
+                    |reply| ProposalMsg::Read {
+                        source: request.source,
+                        reply,
+                    },
                     None,
                 )
                 .await,
@@ -62,7 +65,11 @@ impl DeployState {
         let horizon = unwrap_call(
             self.projector
                 .call(
-                    |reply| ProjectMsg::Project { proposal, viewpoint, reply },
+                    |reply| ProjectMsg::Project {
+                        proposal,
+                        viewpoint,
+                        reply,
+                    },
                     None,
                 )
                 .await,
@@ -74,7 +81,7 @@ impl DeployState {
         // there is no `--target` flag.
         let target = SshTarget::from_node(&horizon.node);
 
-        // Resolve `--builder` (if supplied) against the projected
+        // Resolve the requested builder (if supplied) against the projected
         // ex-nodes. Validates `is_builder && online` *before* any
         // nix invocation so an offline / non-builder name fails
         // with a clear error rather than a TCP timeout deep into
@@ -82,9 +89,9 @@ impl DeployState {
         let builder_target = match &request.builder {
             None => None,
             Some(name) => {
-                // `--builder` resolves against the full horizon —
-                // including the viewpoint node, so `--builder
-                // prometheus --node prometheus` is the legitimate
+                // The builder resolves against the full horizon —
+                // including the viewpoint node, so builder
+                // prometheus with node prometheus is the legitimate
                 // "build on the target" case (offload from a thin
                 // dispatcher to a beefy target). The viewpoint
                 // sits in `horizon.node`; ex-nodes in
@@ -126,8 +133,9 @@ impl DeployState {
         // building remote. The URIs we hand to `nix build` then
         // resolve on the builder's filesystem. When no builder is
         // set the dispatcher's local cache paths are used as-is.
-        let (horizon_uri, system_uri, staging) =
-            self.stage_inputs(&materialized, builder_target.as_ref()).await?;
+        let (horizon_uri, system_uri, staging) = self
+            .stage_inputs(&materialized, builder_target.as_ref())
+            .await?;
 
         let outcome = unwrap_call(
             self.builder
@@ -198,9 +206,14 @@ impl DeployState {
     ) -> Result<DeployOutcome> {
         match outcome {
             BuildPhaseOutcome::EvalDone { drv_path } => Ok(DeployOutcome { stdout: drv_path }),
-            BuildPhaseOutcome::BuildDone { store_path, location } => {
+            BuildPhaseOutcome::BuildDone {
+                store_path,
+                location,
+            } => {
                 if !action.activates() {
-                    return Ok(DeployOutcome { stdout: store_path.as_str().to_string() });
+                    return Ok(DeployOutcome {
+                        stdout: store_path.as_str().to_string(),
+                    });
                 }
                 unwrap_call(
                     self.copier
@@ -232,15 +245,15 @@ impl DeployState {
                         )
                         .await,
                 )??;
-                Ok(DeployOutcome { stdout: store_path.as_str().to_string() })
+                Ok(DeployOutcome {
+                    stdout: store_path.as_str().to_string(),
+                })
             }
         }
     }
 }
 
-fn unwrap_call<T, E>(
-    r: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>,
-) -> Result<T>
+fn unwrap_call<T, E>(r: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>) -> Result<T>
 where
     ractor::MessagingErr<E>: std::fmt::Display,
 {
@@ -293,27 +306,12 @@ impl Actor for DeployCoordinator {
             myself.get_cell(),
         )
         .await?;
-        let (builder, _) = Actor::spawn_linked(
-            Some("build".into()),
-            NixBuilder,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
-        let (copier, _) = Actor::spawn_linked(
-            Some("copy".into()),
-            ClosureCopier,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
-        let (activator, _) = Actor::spawn_linked(
-            Some("activate".into()),
-            Activator,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
+        let (builder, _) =
+            Actor::spawn_linked(Some("build".into()), NixBuilder, (), myself.get_cell()).await?;
+        let (copier, _) =
+            Actor::spawn_linked(Some("copy".into()), ClosureCopier, (), myself.get_cell()).await?;
+        let (activator, _) =
+            Actor::spawn_linked(Some("activate".into()), Activator, (), myself.get_cell()).await?;
         Ok(DeployState {
             proposal_reader,
             projector,

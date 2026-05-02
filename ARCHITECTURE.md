@@ -1,8 +1,8 @@
-# ARCHITECTURE — lojix-cli-v2
+# ARCHITECTURE — lojix-cli
 
-`lojix-cli-v2` is the **forked development repo** for the next
-generation of the CriomOS deploy CLI. It starts as a copy of the
-working `lojix-cli` monolith so the live tool can remain untouched
+This is the **forked development repo** for the next generation of
+the CriomOS deploy CLI. It starts as a copy of the working
+`lojix-cli` monolith so the live tool can remain untouched
 while the new shape is built and verified.
 
 ## Role
@@ -23,8 +23,8 @@ The original `lojix-cli` remains the operator's current deploy tool.
 What lives here:
 
 - the copied actor pipeline from `lojix-cli`
-- the v2 CLI surface and typed request model
-- CriomOS-specific build and activation behavior while v2 is being
+- the CLI surface and typed request model
+- CriomOS-specific build and activation behavior while the fork is being
   proven out
 
 What does not live here:
@@ -36,15 +36,14 @@ What does not live here:
 
 ## Current Code Map
 
-- [src/main.rs](/home/li/git/lojix-cli-v2/src/main.rs): current
-  Clap-first entrypoint and `DeployRequest` construction
-- [src/deploy.rs](/home/li/git/lojix-cli-v2/src/deploy.rs):
+- [src/main.rs](src/main.rs): Nota/request-file entrypoint
+- [src/deploy.rs](src/deploy.rs):
   coordinator; projection, artifact, build, copy, and activation flow
-- [src/build.rs](/home/li/git/lojix-cli-v2/src/build.rs): hardcoded
+- [src/build.rs](src/build.rs): hardcoded
   system-toplevel build attr and remote-builder execution
-- [src/activate.rs](/home/li/git/lojix-cli-v2/src/activate.rs):
+- [src/activate.rs](src/activate.rs):
   system-only activation behavior
-- [tests/](/home/li/git/lojix-cli-v2/tests): argv-shape and
+- [tests/](tests): argv-shape and
   builder-validation tests that currently anchor the existing CLI
 
 ## Invariants
@@ -53,20 +52,20 @@ What does not live here:
 - CriomOS still exposes one public surface:
   `nixosConfigurations.target`.
 - Home deploys build from that same surface via the embedded
-  Home Manager activation package path. V2 does not add a separate
+  Home Manager activation package path. This fork does not add a separate
   `homeConfigurations` surface to CriomOS.
 - Nota is the canonical operator-facing data format.
 - The live `lojix-cli` repo is not the place for this rewrite.
 
 ## Status
 
-**TRANSITIONAL.** Active development fork. When v2 reaches a verified
-shape, the cutover can be decided intentionally; until then both repos
-coexist.
+**TRANSITIONAL.** Active development fork. When the fork reaches a
+verified shape, the cutover can be decided intentionally; until then
+both repos coexist.
 
 ## Cross-Cutting Context
 
 - project-wide engine context: `~/git/criome/ARCHITECTURE.md`
-- current v2 design source: `~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`
+- current design source: `~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`
 - workspace registration + work survey:
-  `~/git/workspace/reports/123-lojix-cli-v2-repo-creation-and-work-survey-2026-05-01.md`
+  workspace report 123, the fork creation and work survey
