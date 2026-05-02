@@ -43,9 +43,9 @@ operator-facing shape direct and avoids reintroducing a hidden
 subcommand/flag grammar.
 
 ```nota
-(FullOs goldragon ouranos "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/<rev>" BootOnce None)
-(OsOnly goldragon ouranos "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)
-(HomeOnly goldragon ouranos li "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)
+(FullOs goldragon ouranos "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)
+(OsOnly goldragon ouranos "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/main" Boot None)
+(HomeOnly goldragon ouranos li "/home/li/git/goldragon/datom.nota" "github:LiGoldragon/CriomOS/main" Profile None)
 ```
 
 Field order should be frozen by the Rust `NotaRecord` schema and
@@ -239,4 +239,3 @@ The three-kind split is real, not a boolean:
   `lojix-cli` is insufficient.
 - `HomeOnly` is a separate user-profile flow and must not share system
   activation machinery.
-

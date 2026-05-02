@@ -38,6 +38,7 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
 fn nix_build_arguments_contain_target_attr_and_overrides() {
     let arguments = nix_build_arguments_for(BuildPlan::full_os(SystemAction::Boot), None);
     assert_eq!(arguments[0], "build");
+    assert!(arguments.contains(&"--refresh".to_string()));
     assert!(arguments.iter().any(|argument| argument.contains(
         "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.system.build.toplevel"
     )));
@@ -65,6 +66,7 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
 fn nix_eval_arguments_use_eval_operation_and_derivation_path_attr() {
     let arguments = nix_build_arguments_for(BuildPlan::full_os(SystemAction::Eval), None);
     assert_eq!(arguments[0], "eval");
+    assert!(arguments.contains(&"--refresh".to_string()));
     assert!(arguments.contains(&"--raw".to_string()));
     assert!(
         arguments

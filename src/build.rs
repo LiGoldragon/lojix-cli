@@ -243,11 +243,13 @@ impl NixBuild {
         let arguments = match self.plan.nix_operation() {
             NixOperation::EvalDrvPath => vec![
                 "eval".to_string(),
+                "--refresh".to_string(),
                 "--raw".to_string(),
                 format!("{target_attr}.drvPath"),
             ],
             NixOperation::BuildClosure => vec![
                 "build".to_string(),
+                "--refresh".to_string(),
                 "--no-link".to_string(),
                 "--print-out-paths".to_string(),
                 target_attr,

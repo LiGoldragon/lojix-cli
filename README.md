@@ -36,7 +36,7 @@ dispatch.
 Run an inline Nota request:
 
 ```sh
-lojix-cli '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" BootOnce None)'
+lojix-cli '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)'
 ```
 
 Run a request file:
@@ -54,7 +54,7 @@ lojix-cli
 Run from this repo without installing:
 
 ```sh
-nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)'
+nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/main" Profile None)'
 ```
 
 The `--` in the last command belongs to `nix run`; it is not a
@@ -103,7 +103,7 @@ Fields:
 | `node` | Target node name within the projected cluster. |
 | `user` | Target Unix/Home Manager user for `HomeOnly`. |
 | `source` | Path to the cluster proposal Nota file. |
-| `criomos` | CriomOS flake reference to evaluate. |
+| `criomos` | CriomOS flake reference to evaluate. Use branch refs such as `github:LiGoldragon/CriomOS/main` for operator-facing requests. |
 | `action` | System action for `FullOs` and `OsOnly`. |
 | `mode` | Home action for `HomeOnly`. |
 | `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
@@ -130,9 +130,9 @@ Home modes:
 Examples:
 
 ```nota
-(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" BootOnce None)
-(OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Build prom)
-(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)
+(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)
+(OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Build prom)
+(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/main" Profile None)
 ```
 
 `HomeOnly` currently rejects a builder. System requests validate the
@@ -247,6 +247,10 @@ builder with paths that exist in the builder's filesystem.
 The optional builder field names a horizon node, not an arbitrary SSH
 host. The name is resolved after horizon projection.
 
+`lojix-cli` passes `--refresh` to Nix for both eval and build
+operations. That keeps branch flake refs fresh without replacing them
+with resolved commit hashes in requests or documentation.
+
 Validation rules:
 
 - `builder == node` is allowed and means "build on the target".
@@ -328,7 +332,7 @@ Build or run through Nix:
 
 ```sh
 nix build .#
-nix run .# -- '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Eval None)'
+nix run .# -- '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Eval None)'
 ```
 
 Repository-specific process and style rules live in `AGENTS.md`.

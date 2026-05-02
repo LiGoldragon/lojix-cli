@@ -64,6 +64,10 @@ The first architectural move is **not** "thin client to forge". It is:
 
 - Jujutsu only. Never `git` CLI.
 - Push immediately after every change.
+- Operator-facing deploy requests use human flake refs such as
+  `github:LiGoldragon/CriomOS/main`; do not paste resolved commit
+  hashes into chat, request examples, docs, or configs to satisfy
+  freshness. Freshness is handled by Nix `--refresh`.
 - Commit message style follows the workspace contract.
 - Beads issues are one-liners — never paragraphs of design /
   implementation / rationale.
