@@ -1,20 +1,339 @@
 # lojix-cli
 
-Forked development repo for the next generation of `lojix-cli`.
-This starts from the current working deploy orchestrator, but it is
-the place where the Nota-native CLI, request files, and home deploy
-work land without destabilizing Li's live tool.
+`lojix-cli` is the CriomOS deploy orchestrator. It reads one Nota
+request, projects a cluster proposal through `horizon-lib`, materializes
+the flake override inputs CriomOS expects, runs `nix`, and optionally
+activates the result.
 
+The CLI has no flags and no subcommands. The request is the interface.
+All operator intent lives in the Nota record.
+
+## Current Status
+
+This repo is the rewrite workspace for the deploy CLI. It is allowed to
+break the old CLI surface so the Nota-native model, the system/home
+deploy split, and local home activation can land in the right shape
+before cutover.
+
+The current implementation supports:
+
+- `FullOs`: system generation with Home Manager included.
+- `OsOnly`: system generation with Home Manager excluded for that
+  CriomOS evaluation.
+- `HomeOnly`: one user's Home Manager activation package, built from
+  the same CriomOS `nixosConfigurations.target` surface.
+- Inline Nota requests, request files, and a no-argument default config.
+- Remote system builders selected from projected horizon nodes.
+- Local Home Manager profile setting and activation.
+- SSH-break-resistant `BootOnce` system activation.
+
+Remote `HomeOnly` activation is intentionally unsupported. It needs a
+separate design for user identity, closure placement, and user service
+dispatch.
+
+## Quick Start
+
+Run an inline Nota request:
+
+```sh
+lojix-cli '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" BootOnce None)'
 ```
-lojix-cli '(FullOs goldragon tiger "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)'
-lojix-cli '(OsOnly goldragon tiger "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)'
-lojix-cli '(HomeOnly goldragon tiger li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)'
+
+Run a request file:
+
+```sh
 lojix-cli ./request.nota
+```
+
+Run the configured default request:
+
+```sh
 lojix-cli
 ```
 
-The current design target is documented in
-`~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`.
+Run from this repo without installing:
 
-For repo rules, read `AGENTS.md`. For the repo's role, read
-`ARCHITECTURE.md`.
+```sh
+nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)'
+```
+
+The `--` in the last command belongs to `nix run`; it is not a
+`lojix-cli` flag.
+
+## Request Input
+
+`lojix-cli` accepts exactly one request source:
+
+| Invocation shape | Meaning |
+|---|---|
+| `lojix-cli '(<record> ...)'` | Decode the command-line text as an inline Nota record. |
+| `lojix-cli ./request.nota` | Read and decode that file. Extra path arguments are rejected. |
+| `lojix-cli` | Load the first existing default config file. |
+
+Default config search order:
+
+1. `LOJIX_CONFIG`
+2. `XDG_CONFIG_HOME/lojix/config.nota`
+3. `HOME/.config/lojix/config.nota`
+
+No-argument mode does not invent a request. It only decodes the default
+Nota file, so "local redeploy by default" is configured by putting the
+desired request in that file.
+
+Inline requests are joined back together when the first shell argument
+starts with `(`. This lets normal shell tokenization work for simple
+records, but quoting the whole record is still the clearest habit.
+
+## Nota Schema
+
+The top-level record head is the deploy kind. Fields are unnamed and
+positional.
+
+```nota
+(FullOs cluster node source criomos action builder?)
+(OsOnly cluster node source criomos action builder?)
+(HomeOnly cluster node user source criomos mode builder?)
+```
+
+Fields:
+
+| Field | Meaning |
+|---|---|
+| `cluster` | Horizon cluster name. |
+| `node` | Target node name within the projected cluster. |
+| `user` | Target Unix/Home Manager user for `HomeOnly`. |
+| `source` | Path to the cluster proposal Nota file. |
+| `criomos` | CriomOS flake reference to evaluate. |
+| `action` | System action for `FullOs` and `OsOnly`. |
+| `mode` | Home action for `HomeOnly`. |
+| `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
+
+System actions:
+
+| Action | Effect |
+|---|---|
+| `Eval` | Evaluate the Nix derivation path only. No closure build or activation. |
+| `Build` | Build the selected closure. No copy or activation. |
+| `Boot` | Build, copy to target, set system profile, install boot entry, reconcile EFI default. |
+| `Switch` | Build, copy to target, set system profile, live switch, reconcile EFI default. |
+| `Test` | Build, copy to target, run a non-persistent test switch. |
+| `BootOnce` | Build, copy to target, install a one-shot boot entry while preserving the current persistent default. |
+
+Home modes:
+
+| Mode | Effect |
+|---|---|
+| `Build` | Build the Home Manager activation package only. |
+| `Profile` | Set the user's Home Manager profile to the built generation. |
+| `Activate` | Set the profile, then run the generation's activation script. |
+
+Examples:
+
+```nota
+(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" BootOnce None)
+(OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Build prom)
+(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)
+```
+
+`HomeOnly` currently rejects a builder. System requests validate the
+builder against the projected horizon before invoking Nix.
+
+## Deploy Kinds
+
+### `FullOs`
+
+`FullOs` builds CriomOS with Home Manager enabled. The result is a
+normal system generation whose system activation owns both OS-level
+state and the Home Manager units embedded in the generation.
+
+`FullOs` and `OsOnly` build the same public CriomOS output:
+
+```text
+nixosConfigurations.target.config.system.build.toplevel
+```
+
+The difference is the generated `deployment` override input.
+
+### `OsOnly`
+
+`OsOnly` builds the same CriomOS system output with Home Manager
+disabled for that evaluation. This is not implemented by merely
+skipping a post-build home step; CriomOS receives an override input
+whose `deployment.includeHome` value is `false`, so the Home Manager
+module and generated users are absent from the evaluated system.
+
+This preserves the CriomOS invariant that the public system surface is
+only:
+
+```text
+nixosConfigurations.target
+```
+
+### `HomeOnly`
+
+`HomeOnly` builds one user's Home Manager activation package from the
+same CriomOS system surface:
+
+```text
+nixosConfigurations.target.config.home-manager.users.<user>.home.activationPackage
+```
+
+Before Nix runs, `lojix-cli` checks that the requested user exists in
+the projected horizon. For `Profile` and `Activate`, it also checks the
+local execution context:
+
+- `USER` or `LOGNAME` must match the requested user.
+- `hostname -s` must match the requested node.
+
+That prevents accidentally mutating the wrong user's home profile.
+
+## How A Deploy Runs
+
+The runtime flow is:
+
+```text
+Nota request
+  -> typed request model
+  -> cluster proposal read from source Nota
+  -> horizon projection for cluster + node
+  -> builder and home-user validation
+  -> materialized override inputs
+  -> nix eval/build
+  -> optional closure copy
+  -> optional system or home activation
+```
+
+The actor pipeline is:
+
+```text
+DeployCoordinator
+  ├── ProposalReader       reads the source Nota proposal
+  ├── HorizonProjector     projects with horizon-lib in-process
+  ├── HorizonArtifact      writes override-input flake directories
+  ├── NixBuilder           runs nix locally or through ssh
+  ├── ClosureCopier        copies system closures to activation targets
+  └── Activator            performs system or local-home activation
+```
+
+Each actor message carries one domain object plus its reply channel.
+Process execution is represented by `ProcessInvocation`, which owns the
+program, arguments, stdout/stderr mode, process group, and kill-on-drop
+behavior.
+
+## Override Inputs
+
+`lojix-cli` materializes three small flake inputs under the user's cache:
+
+| Input | Contents | Used as |
+|---|---|---|
+| `horizon` | Projected horizon JSON and flake wrapper. | `--override-input horizon ...` |
+| `system` | The target Nix system string. | `--override-input system ...` |
+| `deployment` | `deployment.includeHome = true` or `false`. | `--override-input deployment ...` |
+
+The deployment shape is:
+
+| Request kind | `includeHome` |
+|---|---:|
+| `FullOs` | `true` |
+| `OsOnly` | `false` |
+| `HomeOnly` | `true` |
+
+When a remote system builder is used, these override-input directories
+are staged onto the builder first. The Nix command then runs on the
+builder with paths that exist in the builder's filesystem.
+
+## Builder Semantics
+
+The optional builder field names a horizon node, not an arbitrary SSH
+host. The name is resolved after horizon projection.
+
+Validation rules:
+
+- `builder == node` is allowed and means "build on the target".
+- A different builder must be present in projected `ex_nodes`.
+- The builder node must have `is_builder = true`.
+- `HomeOnly` with a builder is rejected.
+
+SSH always uses key-based batch mode. The target address is derived
+from the projected node's Criome domain name as root SSH, not from a
+CLI target flag.
+
+## Activation Details
+
+### System Activation
+
+System activation applies to `FullOs` and `OsOnly`.
+
+For `Boot`, `Switch`, and `Test`, `lojix-cli` copies the built closure
+to the target unless it was already built on the target. It then runs
+the target-side activation command over SSH.
+
+`Boot` and `Switch` set the system profile before
+`switch-to-configuration`, then reconcile EFI state by setting the EFI
+default to the new generation and clearing any pending one-shot entry.
+
+`Test` runs `switch-to-configuration test` without setting the system
+profile and without EFI reconciliation.
+
+`BootOnce` dispatches a target-side transient systemd unit with
+`systemd-run --wait --collect --service-type=oneshot`. If the SSH
+connection drops, the unit continues on the target. The unit installs
+the new boot entry, restores the persistent default to the currently
+running generation, and arms the new generation as the one-shot entry.
+
+### Home Activation
+
+Home activation applies to `HomeOnly`.
+
+`Profile` sets the Home Manager profile in the user's local state
+directory to the built generation. It does not run the generation's
+activation script.
+
+`Activate` runs `Profile` first, then executes the generation's
+activation script. This can mutate the live user session, so use it
+when live home activation is intended.
+
+## Output
+
+On success, stdout is the typed Nix result:
+
+| Request result | Stdout |
+|---|---|
+| `Eval` | The evaluated derivation path. |
+| Build or activation result | The realized output path reported by Nix. |
+
+Nix progress and activation logs stream on stderr. Process failures are
+reported through typed crate errors such as Nix failure, SSH failure,
+local hostname failure, invalid builder, unknown home user, or local
+home context mismatch.
+
+## Development
+
+Enter the development shell:
+
+```sh
+nix develop
+```
+
+Run checks:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --no-fail-fast
+nix flake check --no-write-lock-file
+```
+
+Build or run through Nix:
+
+```sh
+nix build .#
+nix run .# -- '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Eval None)'
+```
+
+Repository-specific process and style rules live in `AGENTS.md`.
+The repo role and invariants live in `ARCHITECTURE.md`. The main
+design records for the current shape are:
+
+- `reports/0001-three-deploy-kind-split.md`
+- `reports/0002-code-standards-remediation.md`
