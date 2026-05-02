@@ -65,10 +65,11 @@ impl RemoteStaging {
                 stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             });
         }
-        let remote_root = PathBuf::from(
-            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        );
-        Ok(Self { target, remote_root })
+        let remote_root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        Ok(Self {
+            target,
+            remote_root,
+        })
     }
 
     /// Rsync `local_dir`'s contents into `<remote_root>/<name>/` on
@@ -82,11 +83,7 @@ impl RemoteStaging {
         // explicitly to avoid path-display ambiguity.
         let mut source = local_dir.as_os_str().to_os_string();
         source.push("/");
-        let dest = format!(
-            "{}:{}/",
-            self.target.as_ssh_arg(),
-            remote_path.display(),
-        );
+        let dest = format!("{}:{}/", self.target.as_ssh_arg(), remote_path.display(),);
         let mut wrap = CommandWrap::with_new("rsync", |c: &mut Command| {
             c.arg("-a")
                 .arg("--delete")

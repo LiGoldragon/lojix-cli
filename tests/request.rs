@@ -1,12 +1,12 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::name::{ClusterName, NodeName, UserName};
 use tempfile::NamedTempFile;
 
-use lojix_cli::build::BuildAction;
+use lojix_cli::build::{BuildPlan, HomeMode, SystemAction};
 use lojix_cli::cluster::{FlakeRef, ProposalSource};
-use lojix_cli::request::{Build, CommandLine, Deploy, Eval, LojixRequest};
+use lojix_cli::request::{CommandLine, FullOs, HomeOnly, LojixRequest, OsOnly};
 
 fn cluster_name() -> ClusterName {
     ClusterName::try_new("goldragon").unwrap()
@@ -14,6 +14,10 @@ fn cluster_name() -> ClusterName {
 
 fn node_name(name: &str) -> NodeName {
     NodeName::try_new(name).unwrap()
+}
+
+fn user_name(name: &str) -> UserName {
+    UserName::try_new(name).unwrap()
 }
 
 fn proposal_source() -> ProposalSource {
@@ -27,7 +31,7 @@ fn criomos_ref() -> FlakeRef {
 #[test]
 fn inline_nota_deploy_request_decodes_after_shell_token_join() {
     let command_line = CommandLine::from_arguments([
-        "(Deploy",
+        "(FullOs",
         "goldragon",
         "tiger",
         "\"/tmp/datom.nota\"",
@@ -39,23 +43,23 @@ fn inline_nota_deploy_request_decodes_after_shell_token_join() {
 
     assert_eq!(
         request,
-        LojixRequest::Deploy(Deploy {
+        LojixRequest::FullOs(FullOs {
             cluster: cluster_name(),
             node: node_name("tiger"),
             source: proposal_source(),
             criomos: criomos_ref(),
-            action: BuildAction::Boot,
+            action: SystemAction::Boot,
             builder: None,
         }),
     );
 }
 
 #[test]
-fn file_path_nota_build_request_decodes() {
+fn file_path_nota_os_only_request_decodes() {
     let mut file = NamedTempFile::new().unwrap();
     write!(
         file,
-        "(Build goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" prometheus)"
+        "(OsOnly goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Build prometheus)"
     )
     .unwrap();
 
@@ -64,12 +68,34 @@ fn file_path_nota_build_request_decodes() {
 
     assert_eq!(
         request,
-        LojixRequest::Build(Build {
+        LojixRequest::OsOnly(OsOnly {
             cluster: cluster_name(),
             node: node_name("tiger"),
             source: proposal_source(),
             criomos: criomos_ref(),
+            action: SystemAction::Build,
             builder: Some(node_name("prometheus")),
+        }),
+    );
+}
+
+#[test]
+fn home_only_request_decodes_user_and_mode() {
+    let request = LojixRequest::from_nota(
+        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Profile)",
+    )
+    .unwrap();
+
+    assert_eq!(
+        request,
+        LojixRequest::HomeOnly(HomeOnly {
+            cluster: cluster_name(),
+            node: node_name("tiger"),
+            user: user_name("li"),
+            source: proposal_source(),
+            criomos: criomos_ref(),
+            mode: HomeMode::Profile,
+            builder: None,
         }),
     );
 }
@@ -90,7 +116,7 @@ fn extra_path_arguments_are_rejected() {
 #[test]
 fn nota_request_rejects_trailing_tokens() {
     let error = LojixRequest::from_nota(
-        "(Eval goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\") trailing",
+        "(FullOs goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Eval) trailing",
     )
     .unwrap_err();
 
@@ -101,30 +127,51 @@ fn nota_request_rejects_trailing_tokens() {
 }
 
 #[test]
-fn build_and_eval_records_map_to_pipeline_actions() {
-    let build = LojixRequest::Build(Build {
+fn system_records_map_to_pipeline_plans() {
+    let os_only = LojixRequest::OsOnly(OsOnly {
         cluster: cluster_name(),
         node: node_name("tiger"),
         source: proposal_source(),
         criomos: criomos_ref(),
+        action: SystemAction::Build,
         builder: Some(node_name("prometheus")),
     })
     .into_deploy_request();
 
-    assert_eq!(build.action, BuildAction::Build);
-    assert_eq!(build.cluster.as_str(), "goldragon");
-    assert_eq!(build.node.as_str(), "tiger");
-    assert_eq!(build.builder.as_ref().unwrap().as_str(), "prometheus");
+    assert_eq!(os_only.plan, BuildPlan::os_only(SystemAction::Build));
+    assert_eq!(os_only.cluster.as_str(), "goldragon");
+    assert_eq!(os_only.node.as_str(), "tiger");
+    assert_eq!(os_only.builder.as_ref().unwrap().as_str(), "prometheus");
 
-    let eval = LojixRequest::Eval(Eval {
+    let eval = LojixRequest::FullOs(FullOs {
         cluster: cluster_name(),
         node: node_name("tiger"),
         source: proposal_source(),
         criomos: criomos_ref(),
+        action: SystemAction::Eval,
         builder: None,
     })
     .into_deploy_request();
 
-    assert_eq!(eval.action, BuildAction::Eval);
+    assert_eq!(eval.plan, BuildPlan::full_os(SystemAction::Eval));
     assert!(eval.builder.is_none());
+}
+
+#[test]
+fn home_record_maps_to_home_plan() {
+    let request = LojixRequest::HomeOnly(HomeOnly {
+        cluster: cluster_name(),
+        node: node_name("tiger"),
+        user: user_name("li"),
+        source: proposal_source(),
+        criomos: criomos_ref(),
+        mode: HomeMode::Activate,
+        builder: None,
+    })
+    .into_deploy_request();
+
+    assert_eq!(
+        request.plan,
+        BuildPlan::home_only(user_name("li"), HomeMode::Activate)
+    );
 }

@@ -36,6 +36,12 @@ fn eval_goldragon_tiger_runs_pipeline_to_nix() {
         "system flake.nix should exist in {system_dir:?}",
     );
 
+    let deployment_dir = dirs_cache_lojix().join("deployment").join("home-on");
+    assert!(
+        deployment_dir.join("flake.nix").exists(),
+        "deployment flake.nix should exist in {deployment_dir:?}",
+    );
+
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
@@ -68,15 +74,18 @@ fn eval_is_deterministic_across_runs() {
                     .join("tiger"),
             ),
             nar_hash_of(&dirs_cache_lojix().join("system").join("x86_64-linux")),
+            nar_hash_of(&dirs_cache_lojix().join("deployment").join("home-on")),
         )
     };
 
-    let (h1, s1) = run();
-    let (h2, s2) = run();
+    let (h1, s1, d1) = run();
+    let (h2, s2, d2) = run();
     assert_eq!(h1, h2, "horizon artifact should be deterministic");
     assert_eq!(s1, s2, "system artifact should be deterministic");
+    assert_eq!(d1, d2, "deployment artifact should be deterministic");
     assert!(h1.starts_with("sha256-"), "horizon narHash SRI: {h1}");
     assert!(s1.starts_with("sha256-"), "system narHash SRI: {s1}");
+    assert!(d1.starts_with("sha256-"), "deployment narHash SRI: {d1}");
 }
 
 fn dirs_cache_lojix() -> PathBuf {
@@ -86,11 +95,12 @@ fn dirs_cache_lojix() -> PathBuf {
 
 fn eval_request_arguments() -> Vec<String> {
     vec![
-        "(Eval".to_string(),
+        "(FullOs".to_string(),
         "goldragon".to_string(),
         "tiger".to_string(),
         format!("\"{GOLDRAGON_NOTA}\""),
         format!("\"{CRIOMOS_PATH}\""),
+        "Eval".to_string(),
         "None)".to_string(),
     ]
 }

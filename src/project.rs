@@ -34,7 +34,11 @@ impl Actor for HorizonProjector {
         _state: &mut Self::State,
     ) -> std::result::Result<(), ActorProcessingErr> {
         match msg {
-            ProjectMsg::Project { proposal, viewpoint, reply } => {
+            ProjectMsg::Project {
+                proposal,
+                viewpoint,
+                reply,
+            } => {
                 let result = proposal.project(&viewpoint).map_err(Into::into);
                 let _ = reply.send(result);
             }

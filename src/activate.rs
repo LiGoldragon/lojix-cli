@@ -1,12 +1,14 @@
+use std::path::Path;
 use std::process::Stdio;
 use std::time::SystemTime;
 
+use horizon_lib::name::{NodeName, UserName};
 use process_wrap::tokio::*;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::build::BuildAction;
+use crate::build::{HomeMode, SystemAction};
 use crate::cluster::StorePath;
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
@@ -32,7 +34,7 @@ use crate::host::SshTarget;
 pub struct SystemActivation {
     pub target: SshTarget,
     pub store_path: StorePath,
-    pub action: BuildAction,
+    pub action: SystemAction,
 }
 
 impl SystemActivation {
@@ -41,10 +43,10 @@ impl SystemActivation {
     /// shape — `systemd_run_argv`).
     pub fn ssh_argv(&self) -> Result<(&'static str, Vec<String>)> {
         let action_word = match self.action {
-            BuildAction::Boot => "boot",
-            BuildAction::Switch => "switch",
-            BuildAction::Test => "test",
-            BuildAction::BootOnce => {
+            SystemAction::Boot => "boot",
+            SystemAction::Switch => "switch",
+            SystemAction::Test => "test",
+            SystemAction::BootOnce => {
                 return Err(Error::NixFailed {
                     status: -1,
                     stderr: "ssh_argv called for BootOnce; use systemd_run_argv".into(),
@@ -58,7 +60,7 @@ impl SystemActivation {
             }
         };
         let store = self.store_path.as_str();
-        let remote_command = if matches!(self.action, BuildAction::Test) {
+        let remote_command = if matches!(self.action, SystemAction::Test) {
             format!("{store}/bin/switch-to-configuration {action_word}")
         } else {
             format!(
@@ -174,7 +176,7 @@ impl SystemActivation {
     /// `Test` is non-persistent and never touches the bootloader.
     /// `BootOnce` is its own thing.
     pub fn requires_efi_reconcile(&self) -> bool {
-        matches!(self.action, BuildAction::Boot | BuildAction::Switch)
+        matches!(self.action, SystemAction::Boot | SystemAction::Switch)
     }
 
     /// (program, argv) for the ssh that reads
@@ -227,7 +229,7 @@ impl SystemActivation {
 
     pub async fn run(&self) -> Result<()> {
         match self.action {
-            BuildAction::BootOnce => self.run_boot_once().await,
+            SystemAction::BootOnce => self.run_boot_once().await,
             _ => self.run_simple().await,
         }
     }
@@ -277,6 +279,108 @@ impl SystemActivation {
                 );
                 Err(error)
             }
+        }
+    }
+}
+
+pub struct HomeActivation {
+    pub node: NodeName,
+    pub user: UserName,
+    pub store_path: StorePath,
+    pub mode: HomeMode,
+}
+
+impl HomeActivation {
+    pub fn profile_argv(&self, home: &Path) -> (&'static str, Vec<String>) {
+        (
+            "nix-env",
+            vec![
+                "-p".to_string(),
+                home.join(".local/state/nix/profiles/home-manager")
+                    .display()
+                    .to_string(),
+                "--set".to_string(),
+                self.store_path.as_str().to_string(),
+            ],
+        )
+    }
+
+    pub fn activate_argv(&self) -> (String, Vec<String>) {
+        (format!("{}/activate", self.store_path.as_str()), Vec::new())
+    }
+
+    pub async fn run(&self) -> Result<()> {
+        match self.mode {
+            HomeMode::Build => Ok(()),
+            HomeMode::Profile => self.run_profile().await,
+            HomeMode::Activate => {
+                self.run_profile().await?;
+                self.run_activate().await
+            }
+        }
+    }
+
+    async fn run_profile(&self) -> Result<()> {
+        self.require_local_context().await?;
+        let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
+        let (program, argv) = self.profile_argv(Path::new(&home));
+        run_local_inherit(program, &argv, "home profile").await
+    }
+
+    async fn run_activate(&self) -> Result<()> {
+        self.require_local_context().await?;
+        let (program, argv) = self.activate_argv();
+        run_local_inherit(&program, &argv, "home activate").await
+    }
+
+    async fn require_local_context(&self) -> Result<()> {
+        let current_user = self.current_user()?;
+        if current_user != self.user.as_str() {
+            return Err(Error::LocalHomeUserMismatch {
+                requested: self.user.clone(),
+                actual: current_user,
+            });
+        }
+
+        let current_node = self.current_node().await?;
+        if current_node != self.node.as_str() {
+            return Err(Error::LocalHomeNodeMismatch {
+                requested: self.node.clone(),
+                actual: current_node,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn current_user(&self) -> Result<String> {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .map_err(|_| Error::NoUser)
+    }
+
+    async fn current_node(&self) -> Result<String> {
+        let output = Command::new("hostname").arg("-s").output().await?;
+        if !output.status.success() {
+            return Err(Error::SshFailed {
+                status: output.status.code().unwrap_or(-1),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+pub enum Activation {
+    System(SystemActivation),
+    Home(HomeActivation),
+}
+
+impl Activation {
+    pub async fn run(&self) -> Result<()> {
+        match self {
+            Self::System(activation) => activation.run().await,
+            Self::Home(activation) => activation.run().await,
         }
     }
 }
@@ -351,11 +455,31 @@ async fn run_ssh_inherit(program: &str, argv: &[String], label: &str) -> Result<
     Ok(())
 }
 
+async fn run_local_inherit(program: &str, argv: &[String], label: &str) -> Result<()> {
+    let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
+        c.args(argv)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+    });
+    wrap.wrap(ProcessGroup::leader());
+    wrap.wrap(KillOnDrop);
+    let mut child = wrap.spawn()?;
+    let status = child.wait().await?;
+    if !status.success() {
+        return Err(Error::NixFailed {
+            status: status.code().unwrap_or(-1),
+            stderr: format!("{label}: non-zero exit (see streamed output)"),
+        });
+    }
+    Ok(())
+}
+
 pub struct Activator;
 
 pub enum ActivateMsg {
     Run {
-        activation: SystemActivation,
+        activation: Activation,
         reply: RpcReplyPort<Result<()>>,
     },
 }

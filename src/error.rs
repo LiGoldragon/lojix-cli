@@ -1,4 +1,4 @@
-use horizon_lib::name::NodeName;
+use horizon_lib::name::{ClusterName, NodeName, UserName};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -31,6 +31,22 @@ pub enum Error {
     #[error("builder {0} is not a valid builder in this horizon (is_builder=false or offline)")]
     InvalidBuilder(NodeName),
 
+    #[error("home-only requests do not support remote builder {0}")]
+    UnsupportedHomeBuilder(NodeName),
+
+    #[error("user {user} not present in projected horizon users for {cluster}/{node}")]
+    UnknownHomeUser {
+        user: UserName,
+        cluster: ClusterName,
+        node: NodeName,
+    },
+
+    #[error("home activation requested for user {requested}, but current user is {actual}")]
+    LocalHomeUserMismatch { requested: UserName, actual: String },
+
+    #[error("home activation requested for node {requested}, but current node is {actual}")]
+    LocalHomeNodeMismatch { requested: NodeName, actual: String },
+
     #[error("invalid {kind}: {got:?}")]
     InvalidName { kind: &'static str, got: String },
 
@@ -42,6 +58,9 @@ pub enum Error {
 
     #[error("HOME env var not set")]
     NoHome,
+
+    #[error("USER/LOGNAME env var not set")]
+    NoUser,
 
     #[error("ractor: {0}")]
     Ractor(String),

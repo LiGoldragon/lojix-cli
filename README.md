@@ -6,7 +6,9 @@ the place where the Nota-native CLI, request files, and home deploy
 work land without destabilizing Li's live tool.
 
 ```
-lojix-cli '(Deploy goldragon tiger "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)'
+lojix-cli '(FullOs goldragon tiger "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)'
+lojix-cli '(OsOnly goldragon tiger "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Boot None)'
+lojix-cli '(HomeOnly goldragon tiger li "./datom.nota" "github:LiGoldragon/CriomOS/<rev>" Profile None)'
 lojix-cli ./request.nota
 lojix-cli
 ```

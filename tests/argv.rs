@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
-use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName};
+use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName, UserName};
 
-use lojix_cli::activate::{parse_gen_number_from_link, SystemActivation};
-use lojix_cli::build::{BuildAction, BuildLocation, NixBuild};
+use lojix_cli::activate::{HomeActivation, SystemActivation, parse_gen_number_from_link};
+use lojix_cli::build::{BuildLocation, BuildPlan, HomeMode, NixBuild, SystemAction};
 use lojix_cli::cluster::{FlakeRef, OverrideUri, StorePath};
 use lojix_cli::copy::ClosureCopy;
 use lojix_cli::host::SshTarget;
@@ -20,12 +20,13 @@ fn target_for(node: &str, cluster: &str) -> SshTarget {
     SshTarget::from_criome_domain(&domain)
 }
 
-fn nix_build_argv_for(action: BuildAction, builder: Option<SshTarget>) -> Vec<String> {
+fn nix_build_argv_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<String> {
     let build = NixBuild {
         flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
         horizon_uri: OverrideUri::from_local_path(Path::new("/cache/horizon")),
         system_uri: OverrideUri::from_local_path(Path::new("/cache/system")),
-        action,
+        deployment_uri: OverrideUri::from_local_path(Path::new("/cache/deployment/home-on")),
+        plan,
         builder,
     };
     let (program, argv) = build.nix_argv();
@@ -35,23 +36,53 @@ fn nix_build_argv_for(action: BuildAction, builder: Option<SshTarget>) -> Vec<St
 
 #[test]
 fn nix_build_argv_contains_target_attr_and_overrides() {
-    let argv = nix_build_argv_for(BuildAction::Boot, None);
+    let argv = nix_build_argv_for(BuildPlan::full_os(SystemAction::Boot), None);
     assert_eq!(argv[0], "build");
     assert!(argv.iter().any(|a| a.contains(
         "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.system.build.toplevel"
     )));
-    let i = argv.iter().position(|a| a == "horizon").expect("horizon flag");
+    let i = argv
+        .iter()
+        .position(|a| a == "horizon")
+        .expect("horizon flag");
     assert_eq!(argv[i + 1], "path:/cache/horizon");
-    let j = argv.iter().position(|a| a == "system").expect("system flag");
+    let j = argv
+        .iter()
+        .position(|a| a == "system")
+        .expect("system flag");
     assert_eq!(argv[j + 1], "path:/cache/system");
+    let k = argv
+        .iter()
+        .position(|a| a == "deployment")
+        .expect("deployment flag");
+    assert_eq!(argv[k + 1], "path:/cache/deployment/home-on");
 }
 
 #[test]
 fn nix_eval_argv_uses_eval_operation_and_drvpath_attr() {
-    let argv = nix_build_argv_for(BuildAction::Eval, None);
+    let argv = nix_build_argv_for(BuildPlan::full_os(SystemAction::Eval), None);
     assert_eq!(argv[0], "eval");
     assert!(argv.contains(&"--raw".to_string()));
     assert!(argv.iter().any(|a| a.ends_with(".drvPath")));
+}
+
+#[test]
+fn nix_home_build_argv_uses_home_activation_package_attr() {
+    let user = UserName::try_new("li").unwrap();
+    let argv = nix_build_argv_for(BuildPlan::home_only(user, HomeMode::Build), None);
+    assert_eq!(argv[0], "build");
+    assert!(argv.iter().any(|a| a.contains(
+        "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.home-manager.users.li.home.activationPackage"
+    )));
+}
+
+#[test]
+fn os_only_plan_disables_home_in_deployment_shape() {
+    let plan = BuildPlan::os_only(SystemAction::Build);
+    let shape = plan.deployment_shape();
+    assert!(!shape.include_home());
+    assert_eq!(shape.cache_name(), "home-off");
+    assert!(shape.flake_text().contains("includeHome = false"));
 }
 
 #[test]
@@ -93,7 +124,10 @@ fn closure_copy_third_party_builder_uses_from_and_to() {
         target,
     };
     let (_, argv) = copy.argv().expect("copy needed");
-    let i = argv.iter().position(|a| a == "--from").expect("--from flag");
+    let i = argv
+        .iter()
+        .position(|a| a == "--from")
+        .expect("--from flag");
     assert_eq!(argv[i + 1], "ssh-ng://root@prometheus.goldragon.criome");
     let j = argv.iter().position(|a| a == "--to").expect("--to flag");
     assert_eq!(argv[j + 1], "ssh-ng://root@zeus.goldragon.criome");
@@ -105,7 +139,7 @@ fn activation_boot_includes_profile_set_and_switch_to_configuration() {
     let activation = SystemActivation {
         target,
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Boot,
+        action: SystemAction::Boot,
     };
     let (program, argv) = activation.ssh_argv().unwrap();
     assert_eq!(program, "ssh");
@@ -113,7 +147,9 @@ fn activation_boot_includes_profile_set_and_switch_to_configuration() {
     assert_eq!(argv[1], "BatchMode=yes");
     assert_eq!(argv[2], "root@zeus.goldragon.criome");
     let remote = &argv[3];
-    assert!(remote.contains("nix-env -p /nix/var/nix/profiles/system --set /nix/store/abc-toplevel"));
+    assert!(
+        remote.contains("nix-env -p /nix/var/nix/profiles/system --set /nix/store/abc-toplevel")
+    );
     assert!(remote.contains("/nix/store/abc-toplevel/bin/switch-to-configuration boot"));
 }
 
@@ -123,11 +159,14 @@ fn activation_test_skips_profile_set() {
     let activation = SystemActivation {
         target,
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Test,
+        action: SystemAction::Test,
     };
     let (_, argv) = activation.ssh_argv().unwrap();
     let remote = &argv[3];
-    assert!(!remote.contains("nix-env"), "test action must not touch the system profile");
+    assert!(
+        !remote.contains("nix-env"),
+        "test action must not touch the system profile"
+    );
     assert!(remote.contains("/nix/store/abc-toplevel/bin/switch-to-configuration test"));
 }
 
@@ -136,16 +175,25 @@ fn boot_once_systemd_run_uses_wait_collect_and_oneshot_service_type() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::BootOnce,
+        action: SystemAction::BootOnce,
     };
     let unit = "lojix-boot-once-test-fixture";
     let (program, argv) = activation.systemd_run_argv(unit);
     assert_eq!(program, "ssh");
     assert_eq!(argv[2], "root@prometheus.goldragon.criome");
     let remote = &argv[3];
-    assert!(remote.contains("systemd-run"), "must use systemd-run; got: {remote}");
-    assert!(remote.contains(&format!("--unit={unit}")), "must pass --unit; got: {remote}");
-    assert!(remote.contains("--collect"), "must use --collect; got: {remote}");
+    assert!(
+        remote.contains("systemd-run"),
+        "must use systemd-run; got: {remote}"
+    );
+    assert!(
+        remote.contains(&format!("--unit={unit}")),
+        "must pass --unit; got: {remote}"
+    );
+    assert!(
+        remote.contains("--collect"),
+        "must use --collect; got: {remote}"
+    );
     assert!(
         remote.contains("--wait"),
         "must use --wait so ssh holds open for live feedback + returns the unit's exit code; \
@@ -162,7 +210,7 @@ fn boot_once_script_uses_current_entry_as_rollback_target() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::BootOnce,
+        action: SystemAction::BootOnce,
     };
     let script = activation.boot_once_script();
     // OLD captures the *currently-running* gen via bootctl
@@ -191,7 +239,7 @@ fn boot_once_script_derives_new_from_system_profile_link_not_efi_var() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::BootOnce,
+        action: SystemAction::BootOnce,
     };
     let script = activation.boot_once_script();
     // NEW must come from /nix/var/nix/profiles/system's target
@@ -218,7 +266,7 @@ fn boot_once_script_seeds_path_for_systemd_transient_unit() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::BootOnce,
+        action: SystemAction::BootOnce,
     };
     let script = activation.boot_once_script();
     // systemd transient units inherit a minimal PATH that
@@ -235,11 +283,14 @@ fn boot_once_ssh_argv_returns_error_directing_caller_to_systemd_run() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::BootOnce,
+        action: SystemAction::BootOnce,
     };
     // BootOnce uses systemd_run_argv, not the simple ssh_argv;
     // misuse-of-API safeguard.
-    assert!(activation.ssh_argv().is_err(), "ssh_argv must refuse for BootOnce");
+    assert!(
+        activation.ssh_argv().is_err(),
+        "ssh_argv must refuse for BootOnce"
+    );
 }
 
 #[test]
@@ -248,7 +299,7 @@ fn activation_switch_includes_profile_set() {
     let activation = SystemActivation {
         target,
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Switch,
+        action: SystemAction::Switch,
     };
     let (_, argv) = activation.ssh_argv().unwrap();
     let remote = &argv[3];
@@ -257,14 +308,43 @@ fn activation_switch_includes_profile_set() {
 }
 
 #[test]
+fn home_profile_activation_sets_home_manager_profile() {
+    let activation = HomeActivation {
+        node: NodeName::try_new("ouranos").unwrap(),
+        user: UserName::try_new("li").unwrap(),
+        store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
+        mode: HomeMode::Profile,
+    };
+    let (program, argv) = activation.profile_argv(Path::new("/home/li"));
+    assert_eq!(program, "nix-env");
+    assert_eq!(argv[0], "-p");
+    assert_eq!(argv[1], "/home/li/.local/state/nix/profiles/home-manager");
+    assert_eq!(argv[2], "--set");
+    assert_eq!(argv[3], "/nix/store/abc-home-manager-generation");
+}
+
+#[test]
+fn home_activate_runs_activation_script_from_generation() {
+    let activation = HomeActivation {
+        node: NodeName::try_new("ouranos").unwrap(),
+        user: UserName::try_new("li").unwrap(),
+        store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
+        mode: HomeMode::Activate,
+    };
+    let (program, argv) = activation.activate_argv();
+    assert_eq!(program, "/nix/store/abc-home-manager-generation/activate");
+    assert!(argv.is_empty());
+}
+
+#[test]
 fn requires_efi_reconcile_only_for_boot_and_switch() {
     let cases = [
-        (BuildAction::Eval, false),
-        (BuildAction::Build, false),
-        (BuildAction::Boot, true),
-        (BuildAction::Switch, true),
-        (BuildAction::Test, false),
-        (BuildAction::BootOnce, false),
+        (SystemAction::Eval, false),
+        (SystemAction::Build, false),
+        (SystemAction::Boot, true),
+        (SystemAction::Switch, true),
+        (SystemAction::Test, false),
+        (SystemAction::BootOnce, false),
     ];
     for (action, want) in cases {
         let activation = SystemActivation {
@@ -285,7 +365,7 @@ fn efi_reconcile_readlink_targets_system_profile() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Boot,
+        action: SystemAction::Boot,
     };
     let (program, argv) = activation.step_readlink_system_profile();
     assert_eq!(program, "ssh");
@@ -298,7 +378,7 @@ fn efi_reconcile_set_default_passes_entry_id_through() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Boot,
+        action: SystemAction::Boot,
     };
     let (_, argv) = activation.step_set_efi_default("nixos-generation-33.conf");
     assert_eq!(argv[3], "bootctl set-default nixos-generation-33.conf");
@@ -309,7 +389,7 @@ fn efi_reconcile_clear_oneshot_uses_empty_string_argument() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
-        action: BuildAction::Boot,
+        action: SystemAction::Boot,
     };
     let (_, argv) = activation.step_clear_efi_oneshot();
     // Empty string clears the EFI variable per `bootctl(1)`. The

@@ -45,7 +45,9 @@ impl ClosureCopy {
     }
 
     pub async fn run(&self) -> Result<()> {
-        let Some((program, argv)) = self.argv() else { return Ok(()) };
+        let Some((program, argv)) = self.argv() else {
+            return Ok(());
+        };
         let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
             c.args(&argv)
                 .stdin(Stdio::null())

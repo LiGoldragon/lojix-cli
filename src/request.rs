@@ -1,47 +1,50 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::name::{ClusterName, NodeName, UserName};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 
-use crate::build::BuildAction;
+use crate::build::{BuildPlan, HomeMode, SystemAction};
 use crate::cluster::{FlakeRef, ProposalSource};
 use crate::deploy::DeployRequest;
 use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
-pub struct Eval {
+pub struct FullOs {
     pub cluster: ClusterName,
     pub node: NodeName,
     pub source: ProposalSource,
     pub criomos: FlakeRef,
+    pub action: SystemAction,
     pub builder: Option<NodeName>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
-pub struct Build {
+pub struct OsOnly {
     pub cluster: ClusterName,
     pub node: NodeName,
     pub source: ProposalSource,
     pub criomos: FlakeRef,
+    pub action: SystemAction,
     pub builder: Option<NodeName>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
-pub struct Deploy {
+pub struct HomeOnly {
     pub cluster: ClusterName,
     pub node: NodeName,
+    pub user: UserName,
     pub source: ProposalSource,
     pub criomos: FlakeRef,
-    pub action: BuildAction,
+    pub mode: HomeMode,
     pub builder: Option<NodeName>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LojixRequest {
-    Eval(Eval),
-    Build(Build),
-    Deploy(Deploy),
+    FullOs(FullOs),
+    OsOnly(OsOnly),
+    HomeOnly(HomeOnly),
 }
 
 impl LojixRequest {
@@ -60,46 +63,46 @@ impl LojixRequest {
 
     pub fn into_deploy_request(self) -> DeployRequest {
         match self {
-            Self::Eval(request) => request.into_deploy_request(),
-            Self::Build(request) => request.into_deploy_request(),
-            Self::Deploy(request) => request.into_deploy_request(),
+            Self::FullOs(request) => request.into_deploy_request(),
+            Self::OsOnly(request) => request.into_deploy_request(),
+            Self::HomeOnly(request) => request.into_deploy_request(),
         }
     }
 }
 
-impl Eval {
+impl FullOs {
     pub fn into_deploy_request(self) -> DeployRequest {
         DeployRequest {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
-            action: BuildAction::Eval,
+            plan: BuildPlan::full_os(self.action),
             source: self.source,
             criomos: self.criomos,
         }
     }
 }
 
-impl Build {
+impl OsOnly {
     pub fn into_deploy_request(self) -> DeployRequest {
         DeployRequest {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
-            action: BuildAction::Build,
+            plan: BuildPlan::os_only(self.action),
             source: self.source,
             criomos: self.criomos,
         }
     }
 }
 
-impl Deploy {
+impl HomeOnly {
     pub fn into_deploy_request(self) -> DeployRequest {
         DeployRequest {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
-            action: self.action,
+            plan: BuildPlan::home_only(self.user, self.mode),
             source: self.source,
             criomos: self.criomos,
         }
@@ -109,9 +112,9 @@ impl Deploy {
 impl NotaEncode for LojixRequest {
     fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
         match self {
-            Self::Eval(request) => request.encode(encoder),
-            Self::Build(request) => request.encode(encoder),
-            Self::Deploy(request) => request.encode(encoder),
+            Self::FullOs(request) => request.encode(encoder),
+            Self::OsOnly(request) => request.encode(encoder),
+            Self::HomeOnly(request) => request.encode(encoder),
         }
     }
 }
@@ -120,9 +123,9 @@ impl NotaDecode for LojixRequest {
     fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
         let head = decoder.peek_record_head()?;
         match head.as_str() {
-            "Eval" => Ok(Self::Eval(Eval::decode(decoder)?)),
-            "Build" => Ok(Self::Build(Build::decode(decoder)?)),
-            "Deploy" => Ok(Self::Deploy(Deploy::decode(decoder)?)),
+            "FullOs" => Ok(Self::FullOs(FullOs::decode(decoder)?)),
+            "OsOnly" => Ok(Self::OsOnly(OsOnly::decode(decoder)?)),
+            "HomeOnly" => Ok(Self::HomeOnly(HomeOnly::decode(decoder)?)),
             other => Err(nota_codec::Error::UnknownKindForVerb {
                 verb: "LojixRequest",
                 got: other.to_string(),

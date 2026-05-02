@@ -6,6 +6,7 @@ use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::species::System;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
+use crate::build::DeploymentShape;
 use crate::cluster::{NarHashSri, OverrideUri};
 use crate::error::{Error, Result};
 
@@ -96,6 +97,36 @@ impl SystemDir {
     }
 }
 
+pub struct DeploymentDir(PathBuf);
+
+impl DeploymentDir {
+    pub fn try_create_cache(shape: DeploymentShape) -> Result<Self> {
+        let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
+        let dir = PathBuf::from(home)
+            .join(".cache/lojix/deployment")
+            .join(shape.cache_name());
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self(dir))
+    }
+
+    pub fn write(&self, shape: DeploymentShape) -> Result<()> {
+        std::fs::write(self.0.join("flake.nix"), shape.flake_text())?;
+        Ok(())
+    }
+
+    pub fn nar_hash(&self) -> Result<NarHashSri> {
+        nar_hash_of(&self.0)
+    }
+
+    pub fn override_uri(&self) -> OverrideUri {
+        OverrideUri::from_local_path(&self.0)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
 fn nar_hash_of(dir: &Path) -> Result<NarHashSri> {
     let out = Command::new("nix")
         .args(["hash", "path", "--type", "sha256", "--sri"])
@@ -115,10 +146,13 @@ fn nar_hash_of(dir: &Path) -> Result<NarHashSri> {
 pub struct MaterializedArtifact {
     pub horizon_dir: HorizonDir,
     pub system_dir: SystemDir,
+    pub deployment_dir: DeploymentDir,
     pub horizon_nar_hash: NarHashSri,
     pub system_nar_hash: NarHashSri,
+    pub deployment_nar_hash: NarHashSri,
     pub horizon_uri: OverrideUri,
     pub system_uri: OverrideUri,
+    pub deployment_uri: OverrideUri,
 }
 
 pub struct HorizonArtifact;
@@ -128,6 +162,7 @@ impl HorizonArtifact {
         horizon: &Horizon,
         cluster: &ClusterName,
         node: &NodeName,
+        deployment_shape: DeploymentShape,
     ) -> Result<MaterializedArtifact> {
         let horizon_dir = HorizonDir::try_create_cache(cluster, node)?;
         horizon_dir.write(horizon)?;
@@ -139,13 +174,21 @@ impl HorizonArtifact {
         let system_nar_hash = system_dir.nar_hash()?;
         let system_uri = system_dir.override_uri();
 
+        let deployment_dir = DeploymentDir::try_create_cache(deployment_shape)?;
+        deployment_dir.write(deployment_shape)?;
+        let deployment_nar_hash = deployment_dir.nar_hash()?;
+        let deployment_uri = deployment_dir.override_uri();
+
         Ok(MaterializedArtifact {
             horizon_dir,
             system_dir,
+            deployment_dir,
             horizon_nar_hash,
             system_nar_hash,
+            deployment_nar_hash,
             horizon_uri,
             system_uri,
+            deployment_uri,
         })
     }
 }
@@ -155,6 +198,7 @@ pub enum ArtifactMsg {
         horizon: Horizon,
         cluster: ClusterName,
         node: NodeName,
+        deployment_shape: DeploymentShape,
         reply: RpcReplyPort<Result<MaterializedArtifact>>,
     },
 }
@@ -180,8 +224,19 @@ impl Actor for HorizonArtifact {
         _state: &mut Self::State,
     ) -> std::result::Result<(), ActorProcessingErr> {
         match msg {
-            ArtifactMsg::Materialize { horizon, cluster, node, reply } => {
-                let _ = reply.send(Self::materialize(&horizon, &cluster, &node));
+            ArtifactMsg::Materialize {
+                horizon,
+                cluster,
+                node,
+                deployment_shape,
+                reply,
+            } => {
+                let _ = reply.send(Self::materialize(
+                    &horizon,
+                    &cluster,
+                    &node,
+                    deployment_shape,
+                ));
             }
         }
         Ok(())

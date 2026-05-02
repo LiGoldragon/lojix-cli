@@ -39,12 +39,12 @@ What does not live here:
 - [src/main.rs](src/main.rs): Nota/request-file entrypoint
 - [src/deploy.rs](src/deploy.rs):
   coordinator; projection, artifact, build, copy, and activation flow
-- [src/build.rs](src/build.rs): hardcoded
-  system-toplevel build attr and remote-builder execution
+- [src/build.rs](src/build.rs): typed build plans, target attr selection,
+  deployment-shape selection, and remote-builder execution
 - [src/activate.rs](src/activate.rs):
-  system-only activation behavior
+  system activation plus local home profile / activation behavior
 - [tests/](tests): argv-shape and
-  builder-validation tests that currently anchor the existing CLI
+  builder-validation tests that anchor the Nota-only CLI
 
 ## Invariants
 

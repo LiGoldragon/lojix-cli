@@ -5,12 +5,14 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+use horizon_lib::name::UserName;
+
 use crate::cluster::{FlakeRef, OverrideUri, StorePath};
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
-pub enum BuildAction {
+pub enum SystemAction {
     Eval,
     Build,
     Boot,
@@ -25,17 +27,176 @@ pub enum BuildAction {
     BootOnce,
 }
 
-impl BuildAction {
+impl SystemAction {
     pub fn produces_closure(self) -> bool {
-        !matches!(self, BuildAction::Eval)
+        !matches!(self, SystemAction::Eval)
     }
 
     pub fn activates(self) -> bool {
         matches!(
             self,
-            BuildAction::Boot | BuildAction::Switch | BuildAction::Test | BuildAction::BootOnce,
+            SystemAction::Boot | SystemAction::Switch | SystemAction::Test | SystemAction::BootOnce,
         )
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
+pub enum HomeMode {
+    Build,
+    Profile,
+    Activate,
+}
+
+impl HomeMode {
+    pub fn activates(self) -> bool {
+        matches!(self, HomeMode::Profile | HomeMode::Activate)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SystemKind {
+    FullOs,
+    OsOnly,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct DeploymentShape {
+    include_home: bool,
+}
+
+impl DeploymentShape {
+    pub fn home_enabled() -> Self {
+        Self { include_home: true }
+    }
+
+    pub fn home_disabled() -> Self {
+        Self {
+            include_home: false,
+        }
+    }
+
+    pub fn include_home(self) -> bool {
+        self.include_home
+    }
+
+    pub fn cache_name(self) -> &'static str {
+        if self.include_home {
+            "home-on"
+        } else {
+            "home-off"
+        }
+    }
+
+    pub fn flake_text(self) -> &'static str {
+        if self.include_home {
+            "{\n  outputs = _: {\n    deployment = {\n      includeHome = true;\n    };\n  };\n}\n"
+        } else {
+            "{\n  outputs = _: {\n    deployment = {\n      includeHome = false;\n    };\n  };\n}\n"
+        }
+    }
+}
+
+impl SystemKind {
+    pub fn deployment_shape(self) -> DeploymentShape {
+        match self {
+            Self::FullOs => DeploymentShape::home_enabled(),
+            Self::OsOnly => DeploymentShape::home_disabled(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuildPlan {
+    System {
+        kind: SystemKind,
+        action: SystemAction,
+    },
+    Home {
+        user: UserName,
+        mode: HomeMode,
+    },
+}
+
+impl BuildPlan {
+    pub fn full_os(action: SystemAction) -> Self {
+        Self::System {
+            kind: SystemKind::FullOs,
+            action,
+        }
+    }
+
+    pub fn os_only(action: SystemAction) -> Self {
+        Self::System {
+            kind: SystemKind::OsOnly,
+            action,
+        }
+    }
+
+    pub fn home_only(user: UserName, mode: HomeMode) -> Self {
+        Self::Home { user, mode }
+    }
+
+    pub fn deployment_shape(&self) -> DeploymentShape {
+        match self {
+            Self::System { kind, .. } => kind.deployment_shape(),
+            Self::Home { .. } => DeploymentShape::home_enabled(),
+        }
+    }
+
+    pub fn system_action(&self) -> Option<SystemAction> {
+        match self {
+            Self::System { action, .. } => Some(*action),
+            Self::Home { .. } => None,
+        }
+    }
+
+    pub fn home_mode(&self) -> Option<HomeMode> {
+        match self {
+            Self::System { .. } => None,
+            Self::Home { mode, .. } => Some(*mode),
+        }
+    }
+
+    pub fn home_user(&self) -> Option<&UserName> {
+        match self {
+            Self::System { .. } => None,
+            Self::Home { user, .. } => Some(user),
+        }
+    }
+
+    pub fn supports_remote_builder(&self) -> bool {
+        matches!(self, Self::System { .. })
+    }
+
+    fn nix_operation(&self) -> NixOperation {
+        match self {
+            Self::System {
+                action: SystemAction::Eval,
+                ..
+            } => NixOperation::EvalDrvPath,
+            Self::System { .. } | Self::Home { .. } => NixOperation::BuildClosure,
+        }
+    }
+
+    fn target_attr(&self, flake: &FlakeRef) -> String {
+        match self {
+            Self::System { .. } => format!(
+                "{}#nixosConfigurations.target.config.system.build.toplevel",
+                flake.as_str(),
+            ),
+            Self::Home { user, .. } => format!(
+                "{}#nixosConfigurations.target.config.home-manager.users.{}.home.activationPackage",
+                flake.as_str(),
+                user.as_str(),
+            ),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum NixOperation {
+    EvalDrvPath,
+    BuildClosure,
 }
 
 /// Where the build phase's closure landed. Drives the copy phase:
@@ -62,7 +223,8 @@ pub struct NixBuild {
     pub flake: FlakeRef,
     pub horizon_uri: OverrideUri,
     pub system_uri: OverrideUri,
-    pub action: BuildAction,
+    pub deployment_uri: OverrideUri,
+    pub plan: BuildPlan,
     pub builder: Option<SshTarget>,
 }
 
@@ -72,21 +234,14 @@ impl NixBuild {
     /// `builder` is set. Exposed so tests can assert wire shape
     /// without spawning nix.
     pub fn nix_argv(&self) -> (&'static str, Vec<String>) {
-        let target_attr = format!(
-            "{}#nixosConfigurations.target.config.system.build.toplevel",
-            self.flake.as_str(),
-        );
-        let mut argv = match self.action {
-            BuildAction::Eval => vec![
+        let target_attr = self.plan.target_attr(&self.flake);
+        let mut argv = match self.plan.nix_operation() {
+            NixOperation::EvalDrvPath => vec![
                 "eval".to_string(),
                 "--raw".to_string(),
                 format!("{target_attr}.drvPath"),
             ],
-            BuildAction::Build
-            | BuildAction::Boot
-            | BuildAction::Switch
-            | BuildAction::Test
-            | BuildAction::BootOnce => vec![
+            NixOperation::BuildClosure => vec![
                 "build".to_string(),
                 "--no-link".to_string(),
                 "--print-out-paths".to_string(),
@@ -99,6 +254,9 @@ impl NixBuild {
         argv.push("--override-input".to_string());
         argv.push("system".to_string());
         argv.push(self.system_uri.as_str().to_string());
+        argv.push("--override-input".to_string());
+        argv.push("deployment".to_string());
+        argv.push(self.deployment_uri.as_str().to_string());
         ("nix", argv)
     }
 
@@ -115,11 +273,11 @@ impl NixBuild {
             Some(target) => run_remote(target, program, &argv).await?,
         };
 
-        match self.action {
-            BuildAction::Eval => Ok(BuildPhaseOutcome::EvalDone {
+        match self.plan.nix_operation() {
+            NixOperation::EvalDrvPath => Ok(BuildPhaseOutcome::EvalDone {
                 drv_path: stdout.trim().to_string(),
             }),
-            _ => {
+            NixOperation::BuildClosure => {
                 let store_path = StorePath::try_new(stdout)?;
                 let location = match &self.builder {
                     None => BuildLocation::Dispatcher,

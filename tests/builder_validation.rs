@@ -19,11 +19,12 @@ fn skip_if_no_datom() -> bool {
 
 fn eval_request_arguments(node: &str, builder: &str) -> Vec<String> {
     vec![
-        "(Eval".to_string(),
+        "(FullOs".to_string(),
         "goldragon".to_string(),
         node.to_string(),
         format!("\"{GOLDRAGON_NOTA}\""),
         format!("\"{CRIOMOS_PATH}\""),
+        "Eval".to_string(),
         format!("{builder})"),
     ]
 }
