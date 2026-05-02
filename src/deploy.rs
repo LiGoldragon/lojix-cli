@@ -7,13 +7,16 @@ use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, SystemActivation};
-use crate::artifact::{ArtifactMsg, HorizonArtifact, MaterializedArtifact};
+use crate::artifact::{
+    ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HorizonArtifact,
+    MaterializedArtifact,
+};
 use crate::build::{BuildMsg, BuildPhaseOutcome, BuildPlan, HomeMode, NixBuild, NixBuilder};
-use crate::cluster::{FlakeRef, OverrideUri, ProposalSource};
+use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, ProposalSource, StorePath};
 use crate::copy::{ClosureCopier, ClosureCopy, CopyMsg};
 use crate::error::{Error, Result};
-use crate::host::{RemoteStaging, SshTarget};
-use crate::project::{HorizonProjector, ProjectMsg};
+use crate::host::{RemoteRsync, RemoteStaging, SshTarget};
+use crate::project::{HorizonProjection, HorizonProjectionInput, HorizonProjector, ProjectMsg};
 use crate::proposal::{ProposalMsg, ProposalReader};
 
 // No RPC timeout — `nix build` of a NixOS system from cold cache can
@@ -47,10 +50,18 @@ impl DeployRequest {
 }
 
 #[derive(Debug)]
-pub struct DeployOutcome {
-    /// `Eval` returns a drvPath; everything else returns the
-    /// realised `/nix/store/...` toplevel.
-    pub stdout: String,
+pub enum DeployOutcome {
+    Evaluated { derivation_path: DerivationPath },
+    Realized { store_path: StorePath },
+}
+
+impl DeployOutcome {
+    pub fn stdout_text(&self) -> String {
+        match self {
+            Self::Evaluated { derivation_path } => derivation_path.as_str().to_string(),
+            Self::Realized { store_path } => store_path.as_str().to_string(),
+        }
+    }
 }
 
 pub struct DeployState {
@@ -64,7 +75,7 @@ pub struct DeployState {
 
 impl DeployState {
     async fn run(&self, request: DeployRequest) -> Result<DeployOutcome> {
-        let proposal = unwrap_call(
+        let proposal = ActorCallResult::from_result(
             self.proposal_reader
                 .call(
                     |reply| ProposalMsg::Read {
@@ -74,24 +85,28 @@ impl DeployState {
                     None,
                 )
                 .await,
-        )??;
+        )
+        .into_payload()??;
 
         let viewpoint = Viewpoint {
             cluster: request.cluster.clone(),
             node: request.node.clone(),
         };
-        let horizon = unwrap_call(
+        let horizon = ActorCallResult::from_result(
             self.projector
                 .call(
                     |reply| ProjectMsg::Project {
-                        proposal,
-                        viewpoint,
+                        projection: HorizonProjection::from_input(HorizonProjectionInput {
+                            proposal,
+                            viewpoint,
+                        }),
                         reply,
                     },
                     None,
                 )
                 .await,
-        )??;
+        )
+        .into_payload()??;
 
         request.validate_home_user(&horizon.users)?;
 
@@ -138,38 +153,46 @@ impl DeployState {
             }
         };
 
-        let materialized = unwrap_call(
+        let materialized = ActorCallResult::from_result(
             self.artifact
                 .call(
                     |reply| ArtifactMsg::Materialize {
-                        horizon,
-                        cluster: request.cluster.clone(),
-                        node: request.node.clone(),
-                        deployment_shape: request.plan.deployment_shape(),
+                        materialization: ArtifactMaterialization::from_input(
+                            ArtifactMaterializationInput {
+                                horizon,
+                                cluster: request.cluster.clone(),
+                                node: request.node.clone(),
+                                deployment_shape: request.plan.deployment_shape(),
+                            },
+                        ),
                         reply,
                     },
                     None,
                 )
                 .await,
-        )??;
+        )
+        .into_payload()??;
 
         // Stage override-input dirs onto the builder if we're
         // building remote. The URIs we hand to `nix build` then
         // resolve on the builder's filesystem. When no builder is
         // set the dispatcher's local cache paths are used as-is.
-        let (horizon_uri, system_uri, deployment_uri, staging) = self
-            .stage_inputs(&materialized, builder_target.as_ref())
+        let staged_inputs = self
+            .stage_inputs(StageInputsRequest {
+                materialized: &materialized,
+                builder: builder_target.as_ref(),
+            })
             .await?;
 
-        let outcome = unwrap_call(
+        let outcome = ActorCallResult::from_result(
             self.builder
                 .call(
                     |reply| BuildMsg::Run {
                         build: NixBuild {
                             flake: request.criomos.clone(),
-                            horizon_uri,
-                            system_uri,
-                            deployment_uri,
+                            horizon_uri: staged_inputs.horizon_uri.clone(),
+                            system_uri: staged_inputs.system_uri.clone(),
+                            deployment_uri: staged_inputs.deployment_uri.clone(),
                             plan: request.plan.clone(),
                             builder: builder_target.clone(),
                         },
@@ -178,12 +201,18 @@ impl DeployState {
                     None,
                 )
                 .await,
-        )??;
+        )
+        .into_payload()??;
 
         let result = self
-            .finish(request.plan, request.node.clone(), target, outcome)
+            .finish(FinishRequest {
+                plan: request.plan,
+                node: request.node.clone(),
+                target,
+                outcome,
+            })
             .await;
-        if let Some(staging) = staging {
+        if let Some(staging) = staged_inputs.staging {
             // Best-effort cleanup. A leftover /tmp/lojix-stage.*
             // dir doesn't break anything but we surface failures
             // rather than swallow them silently — only by
@@ -201,70 +230,77 @@ impl DeployState {
         result
     }
 
-    async fn stage_inputs(
-        &self,
-        materialized: &MaterializedArtifact,
-        builder: Option<&SshTarget>,
-    ) -> Result<(OverrideUri, OverrideUri, OverrideUri, Option<RemoteStaging>)> {
-        match builder {
-            None => Ok((
-                materialized.horizon_uri.clone(),
-                materialized.system_uri.clone(),
-                materialized.deployment_uri.clone(),
-                None,
-            )),
+    async fn stage_inputs(&self, request: StageInputsRequest<'_>) -> Result<StagedInputs> {
+        match request.builder {
+            None => Ok(StagedInputs {
+                horizon_uri: request.materialized.horizon_uri.clone(),
+                system_uri: request.materialized.system_uri.clone(),
+                deployment_uri: request.materialized.deployment_uri.clone(),
+                staging: None,
+            }),
             Some(target) => {
                 let staging = RemoteStaging::try_create(target.clone()).await?;
                 let horizon_uri = staging
-                    .rsync(materialized.horizon_dir.path(), "horizon")
+                    .rsync(RemoteRsync {
+                        local_dir: request.materialized.horizon_dir.path(),
+                        name: "horizon",
+                    })
                     .await?;
                 let system_uri = staging
-                    .rsync(materialized.system_dir.path(), "system")
+                    .rsync(RemoteRsync {
+                        local_dir: request.materialized.system_dir.path(),
+                        name: "system",
+                    })
                     .await?;
                 let deployment_uri = staging
-                    .rsync(materialized.deployment_dir.path(), "deployment")
+                    .rsync(RemoteRsync {
+                        local_dir: request.materialized.deployment_dir.path(),
+                        name: "deployment",
+                    })
                     .await?;
-                Ok((horizon_uri, system_uri, deployment_uri, Some(staging)))
+                Ok(StagedInputs {
+                    horizon_uri,
+                    system_uri,
+                    deployment_uri,
+                    staging: Some(staging),
+                })
             }
         }
     }
 
-    async fn finish(
-        &self,
-        plan: BuildPlan,
-        node: NodeName,
-        target: SshTarget,
-        outcome: BuildPhaseOutcome,
-    ) -> Result<DeployOutcome> {
-        match outcome {
-            BuildPhaseOutcome::EvalDone { drv_path } => Ok(DeployOutcome { stdout: drv_path }),
+    async fn finish(&self, request: FinishRequest) -> Result<DeployOutcome> {
+        match request.outcome {
+            BuildPhaseOutcome::EvalDone { derivation_path } => {
+                Ok(DeployOutcome::Evaluated { derivation_path })
+            }
             BuildPhaseOutcome::BuildDone {
                 store_path,
                 location,
             } => {
-                match plan {
+                match request.plan {
                     BuildPlan::System { action, .. } if action.activates() => {
-                        unwrap_call(
+                        ActorCallResult::from_result(
                             self.copier
                                 .call(
                                     |reply| CopyMsg::Run {
                                         copy: ClosureCopy {
                                             store_path: store_path.clone(),
                                             source: location,
-                                            target: target.clone(),
+                                            target: request.target.clone(),
                                         },
                                         reply,
                                     },
                                     None,
                                 )
                                 .await,
-                        )??;
-                        unwrap_call(
+                        )
+                        .into_payload()??;
+                        ActorCallResult::from_result(
                             self.activator
                                 .call(
                                     |reply| ActivateMsg::Run {
                                         activation: Activation::System(SystemActivation {
-                                            target,
+                                            target: request.target,
                                             store_path: store_path.clone(),
                                             action,
                                         }),
@@ -273,22 +309,21 @@ impl DeployState {
                                     None,
                                 )
                                 .await,
-                        )??;
+                        )
+                        .into_payload()??;
                     }
                     BuildPlan::System { .. } => {}
                     BuildPlan::Home {
-                        user,
                         mode: HomeMode::Build,
-                    } => {
-                        let _ = user;
-                    }
+                        ..
+                    } => {}
                     BuildPlan::Home { user, mode } => {
-                        unwrap_call(
+                        ActorCallResult::from_result(
                             self.activator
                                 .call(
                                     |reply| ActivateMsg::Run {
                                         activation: Activation::Home(HomeActivation {
-                                            node,
+                                            node: request.node,
                                             user,
                                             store_path: store_path.clone(),
                                             mode,
@@ -298,26 +333,58 @@ impl DeployState {
                                     None,
                                 )
                                 .await,
-                        )??;
+                        )
+                        .into_payload()??;
                     }
                 }
-                Ok(DeployOutcome {
-                    stdout: store_path.as_str().to_string(),
-                })
+                Ok(DeployOutcome::Realized { store_path })
             }
         }
     }
 }
 
-fn unwrap_call<T, E>(r: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>) -> Result<T>
+struct StageInputsRequest<'request> {
+    materialized: &'request MaterializedArtifact,
+    builder: Option<&'request SshTarget>,
+}
+
+struct StagedInputs {
+    horizon_uri: OverrideUri,
+    system_uri: OverrideUri,
+    deployment_uri: OverrideUri,
+    staging: Option<RemoteStaging>,
+}
+
+struct FinishRequest {
+    plan: BuildPlan,
+    node: NodeName,
+    target: SshTarget,
+    outcome: BuildPhaseOutcome,
+}
+
+struct ActorCallResult<T, E> {
+    result: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>,
+}
+
+impl<T, E> ActorCallResult<T, E>
 where
     ractor::MessagingErr<E>: std::fmt::Display,
 {
-    match r {
-        Ok(CallResult::Success(t)) => Ok(t),
-        Ok(CallResult::Timeout) => Err(Error::Ractor("rpc timeout".into())),
-        Ok(CallResult::SenderError) => Err(Error::Ractor("rpc sender error".into())),
-        Err(e) => Err(Error::Ractor(e.to_string())),
+    fn from_result(result: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>) -> Self {
+        Self { result }
+    }
+
+    fn into_payload(self) -> Result<T> {
+        match self.result {
+            Ok(CallResult::Success(payload)) => Ok(payload),
+            Ok(CallResult::Timeout) => Err(Error::ActorRpcFailed { reason: "timeout" }),
+            Ok(CallResult::SenderError) => Err(Error::ActorRpcFailed {
+                reason: "sender error",
+            }),
+            Err(error) => Err(Error::ActorMessagingFailed {
+                message: error.to_string(),
+            }),
+        }
     }
 }
 

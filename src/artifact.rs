@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use horizon_lib::Horizon;
 use horizon_lib::name::{ClusterName, NodeName};
@@ -9,6 +8,7 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use crate::build::DeploymentShape;
 use crate::cluster::{NarHashSri, OverrideUri};
 use crate::error::{Error, Result};
+use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
 const HORIZON_FLAKE_TEMPLATE: &str = "{\n\
 \x20 outputs = _: {\n\
@@ -23,22 +23,35 @@ const SYSTEM_FLAKE_TEMPLATE_SUFFIX: &str = "\";\n\
 \x20 };\n\
 }\n";
 
-fn nix_system(s: System) -> &'static str {
-    match s {
-        System::X86_64Linux => "x86_64-linux",
-        System::Aarch64Linux => "aarch64-linux",
+struct NixSystemName(&'static str);
+
+impl NixSystemName {
+    fn from_system(system: System) -> Self {
+        match system {
+            System::X86_64Linux => Self("x86_64-linux"),
+            System::Aarch64Linux => Self("aarch64-linux"),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        self.0
     }
 }
 
 pub struct HorizonDir(PathBuf);
 
+pub struct HorizonCacheKey<'key> {
+    pub cluster: &'key ClusterName,
+    pub node: &'key NodeName,
+}
+
 impl HorizonDir {
-    pub fn try_create_cache(cluster: &ClusterName, node: &NodeName) -> Result<Self> {
+    pub fn try_create_cache(key: HorizonCacheKey<'_>) -> Result<Self> {
         let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
         let dir = PathBuf::from(home)
             .join(".cache/lojix/horizon")
-            .join(cluster.as_str())
-            .join(node.as_str());
+            .join(key.cluster.as_str())
+            .join(key.node.as_str());
         std::fs::create_dir_all(&dir)?;
         Ok(Self(dir))
     }
@@ -50,8 +63,8 @@ impl HorizonDir {
         Ok(())
     }
 
-    pub fn nar_hash(&self) -> Result<NarHashSri> {
-        nar_hash_of(&self.0)
+    pub async fn nar_hash(&self) -> Result<NarHashSri> {
+        NarHashInput::from_directory(&self.0).calculate().await
     }
 
     pub fn override_uri(&self) -> OverrideUri {
@@ -70,7 +83,7 @@ impl SystemDir {
         let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
         let dir = PathBuf::from(home)
             .join(".cache/lojix/system")
-            .join(nix_system(system));
+            .join(NixSystemName::from_system(system).as_str());
         std::fs::create_dir_all(&dir)?;
         Ok(Self(dir))
     }
@@ -78,14 +91,14 @@ impl SystemDir {
     pub fn write(&self, system: System) -> Result<()> {
         let mut flake = String::new();
         flake.push_str(SYSTEM_FLAKE_TEMPLATE_PREFIX);
-        flake.push_str(nix_system(system));
+        flake.push_str(NixSystemName::from_system(system).as_str());
         flake.push_str(SYSTEM_FLAKE_TEMPLATE_SUFFIX);
         std::fs::write(self.0.join("flake.nix"), flake)?;
         Ok(())
     }
 
-    pub fn nar_hash(&self) -> Result<NarHashSri> {
-        nar_hash_of(&self.0)
+    pub async fn nar_hash(&self) -> Result<NarHashSri> {
+        NarHashInput::from_directory(&self.0).calculate().await
     }
 
     pub fn override_uri(&self) -> OverrideUri {
@@ -114,8 +127,8 @@ impl DeploymentDir {
         Ok(())
     }
 
-    pub fn nar_hash(&self) -> Result<NarHashSri> {
-        nar_hash_of(&self.0)
+    pub async fn nar_hash(&self) -> Result<NarHashSri> {
+        NarHashInput::from_directory(&self.0).calculate().await
     }
 
     pub fn override_uri(&self) -> OverrideUri {
@@ -127,20 +140,28 @@ impl DeploymentDir {
     }
 }
 
-fn nar_hash_of(dir: &Path) -> Result<NarHashSri> {
-    let out = Command::new("nix")
-        .args(["hash", "path", "--type", "sha256", "--sri"])
-        .arg(dir)
-        .output()?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        return Err(Error::NixFailed {
-            status: out.status.code().unwrap_or(-1),
-            stderr,
-        });
+struct NarHashInput<'directory> {
+    directory: &'directory Path,
+}
+
+impl<'directory> NarHashInput<'directory> {
+    fn from_directory(directory: &'directory Path) -> Self {
+        Self { directory }
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    NarHashSri::try_new(s)
+
+    fn invocation(&self) -> ProcessInvocation {
+        ProcessInvocation::new("nix")
+            .with_arguments(["hash", "path", "--type", "sha256", "--sri"])
+            .with_argument(self.directory.display().to_string())
+    }
+
+    async fn calculate(&self) -> Result<NarHashSri> {
+        let output = self
+            .invocation()
+            .capture_stdout(ProcessRun::capture_stderr(ProcessFailure::Nix))
+            .await?;
+        NarHashSri::try_new(output.stdout().trim().to_string())
+    }
 }
 
 pub struct MaterializedArtifact {
@@ -157,26 +178,47 @@ pub struct MaterializedArtifact {
 
 pub struct HorizonArtifact;
 
-impl HorizonArtifact {
-    pub fn materialize(
-        horizon: &Horizon,
-        cluster: &ClusterName,
-        node: &NodeName,
-        deployment_shape: DeploymentShape,
-    ) -> Result<MaterializedArtifact> {
-        let horizon_dir = HorizonDir::try_create_cache(cluster, node)?;
-        horizon_dir.write(horizon)?;
-        let horizon_nar_hash = horizon_dir.nar_hash()?;
+pub struct ArtifactMaterialization {
+    horizon: Horizon,
+    cluster: ClusterName,
+    node: NodeName,
+    deployment_shape: DeploymentShape,
+}
+
+pub struct ArtifactMaterializationInput {
+    pub horizon: Horizon,
+    pub cluster: ClusterName,
+    pub node: NodeName,
+    pub deployment_shape: DeploymentShape,
+}
+
+impl ArtifactMaterialization {
+    pub fn from_input(input: ArtifactMaterializationInput) -> Self {
+        Self {
+            horizon: input.horizon,
+            cluster: input.cluster,
+            node: input.node,
+            deployment_shape: input.deployment_shape,
+        }
+    }
+
+    pub async fn materialize(&self) -> Result<MaterializedArtifact> {
+        let horizon_dir = HorizonDir::try_create_cache(HorizonCacheKey {
+            cluster: &self.cluster,
+            node: &self.node,
+        })?;
+        horizon_dir.write(&self.horizon)?;
+        let horizon_nar_hash = horizon_dir.nar_hash().await?;
         let horizon_uri = horizon_dir.override_uri();
 
-        let system_dir = SystemDir::try_create_cache(horizon.node.system)?;
-        system_dir.write(horizon.node.system)?;
-        let system_nar_hash = system_dir.nar_hash()?;
+        let system_dir = SystemDir::try_create_cache(self.horizon.node.system)?;
+        system_dir.write(self.horizon.node.system)?;
+        let system_nar_hash = system_dir.nar_hash().await?;
         let system_uri = system_dir.override_uri();
 
-        let deployment_dir = DeploymentDir::try_create_cache(deployment_shape)?;
-        deployment_dir.write(deployment_shape)?;
-        let deployment_nar_hash = deployment_dir.nar_hash()?;
+        let deployment_dir = DeploymentDir::try_create_cache(self.deployment_shape)?;
+        deployment_dir.write(self.deployment_shape)?;
+        let deployment_nar_hash = deployment_dir.nar_hash().await?;
         let deployment_uri = deployment_dir.override_uri();
 
         Ok(MaterializedArtifact {
@@ -195,10 +237,7 @@ impl HorizonArtifact {
 
 pub enum ArtifactMsg {
     Materialize {
-        horizon: Horizon,
-        cluster: ClusterName,
-        node: NodeName,
-        deployment_shape: DeploymentShape,
+        materialization: ArtifactMaterialization,
         reply: RpcReplyPort<Result<MaterializedArtifact>>,
     },
 }
@@ -225,18 +264,10 @@ impl Actor for HorizonArtifact {
     ) -> std::result::Result<(), ActorProcessingErr> {
         match msg {
             ArtifactMsg::Materialize {
-                horizon,
-                cluster,
-                node,
-                deployment_shape,
+                materialization,
                 reply,
             } => {
-                let _ = reply.send(Self::materialize(
-                    &horizon,
-                    &cluster,
-                    &node,
-                    deployment_shape,
-                ));
+                let _ = reply.send(materialization.materialize().await);
             }
         }
         Ok(())

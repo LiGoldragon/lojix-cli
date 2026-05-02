@@ -1,15 +1,11 @@
-use std::process::Stdio;
-
-use process_wrap::tokio::*;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use horizon_lib::name::UserName;
 
-use crate::cluster::{FlakeRef, OverrideUri, StorePath};
-use crate::error::{Error, Result};
+use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, StorePath};
+use crate::error::Result;
 use crate::host::SshTarget;
+use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
 pub enum SystemAction {
@@ -19,11 +15,11 @@ pub enum SystemAction {
     Switch,
     Test,
     /// Install the new generation's bootloader entry, but keep the
-    /// persistent default pointing at the *current* gen and set
-    /// the new gen as a one-shot. Reboot 1 lands the new gen;
+    /// persistent default pointing at the *current* generation and set
+    /// the new generation as a one-shot. Reboot 1 lands the new generation;
     /// reboot 2 (and every subsequent boot) returns to the old
-    /// gen automatically. Designed for headless boxes where a
-    /// permanent-default boot of an unverified gen is unsafe.
+    /// generation automatically. Designed for headless boxes where a
+    /// permanent-default boot of an unverified generation is unsafe.
     BootOnce,
 }
 
@@ -117,6 +113,12 @@ pub enum BuildPlan {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HomeBuildPlan {
+    pub user: UserName,
+    pub mode: HomeMode,
+}
+
 impl BuildPlan {
     pub fn full_os(action: SystemAction) -> Self {
         Self::System {
@@ -132,8 +134,11 @@ impl BuildPlan {
         }
     }
 
-    pub fn home_only(user: UserName, mode: HomeMode) -> Self {
-        Self::Home { user, mode }
+    pub fn home_only(home: HomeBuildPlan) -> Self {
+        Self::Home {
+            user: home.user,
+            mode: home.mode,
+        }
     }
 
     pub fn deployment_shape(&self) -> DeploymentShape {
@@ -210,8 +215,8 @@ pub enum BuildLocation {
 
 #[derive(Debug)]
 pub enum BuildPhaseOutcome {
-    /// `Eval` action — drvPath only, no closure.
-    EvalDone { drv_path: String },
+    /// `Eval` action — derivation path only, no closure.
+    EvalDone { derivation_path: DerivationPath },
     /// `Build`/`Boot`/`Switch`/`Test` — closure realised somewhere.
     BuildDone {
         store_path: StorePath,
@@ -229,13 +234,13 @@ pub struct NixBuild {
 }
 
 impl NixBuild {
-    /// (program, argv) for the nix invocation. Pure — the same
-    /// values are run locally or wrapped into an ssh argv when a
+    /// Invocation for the nix command. Pure — the same values are run
+    /// locally or wrapped into an ssh invocation when a
     /// `builder` is set. Exposed so tests can assert wire shape
     /// without spawning nix.
-    pub fn nix_argv(&self) -> (&'static str, Vec<String>) {
+    pub fn nix_invocation(&self) -> ProcessInvocation {
         let target_attr = self.plan.target_attr(&self.flake);
-        let mut argv = match self.plan.nix_operation() {
+        let arguments = match self.plan.nix_operation() {
             NixOperation::EvalDrvPath => vec![
                 "eval".to_string(),
                 "--raw".to_string(),
@@ -248,34 +253,37 @@ impl NixBuild {
                 target_attr,
             ],
         };
-        argv.push("--override-input".to_string());
-        argv.push("horizon".to_string());
-        argv.push(self.horizon_uri.as_str().to_string());
-        argv.push("--override-input".to_string());
-        argv.push("system".to_string());
-        argv.push(self.system_uri.as_str().to_string());
-        argv.push("--override-input".to_string());
-        argv.push("deployment".to_string());
-        argv.push(self.deployment_uri.as_str().to_string());
-        ("nix", argv)
+        ProcessInvocation::new("nix")
+            .with_arguments(arguments)
+            .with_arguments([
+                "--override-input".to_string(),
+                "horizon".to_string(),
+                self.horizon_uri.as_str().to_string(),
+                "--override-input".to_string(),
+                "system".to_string(),
+                self.system_uri.as_str().to_string(),
+                "--override-input".to_string(),
+                "deployment".to_string(),
+                self.deployment_uri.as_str().to_string(),
+            ])
     }
 
     pub async fn run(&self) -> Result<BuildPhaseOutcome> {
-        let (program, argv) = self.nix_argv();
+        let invocation = self.execution_invocation();
         // stderr inherits the dispatcher's terminal so nix's
         // progress (and ssh diagnostics, when running remote)
-        // stream live. stdout is piped — drvPath / store path is
+        // stream live. stdout is piped — derivation path / store path is
         // returned to the caller. ProcessGroup + KillOnDrop reap
         // the whole nix child tree (and any ssh tunnel) on
         // Ctrl-C / future-drop.
-        let stdout = match &self.builder {
-            None => run_local(program, &argv).await?,
-            Some(target) => run_remote(target, program, &argv).await?,
-        };
+        let output = invocation
+            .capture_stdout(ProcessRun::inherit_stderr(ProcessFailure::Nix))
+            .await?;
+        let stdout = output.stdout();
 
         match self.plan.nix_operation() {
             NixOperation::EvalDrvPath => Ok(BuildPhaseOutcome::EvalDone {
-                drv_path: stdout.trim().to_string(),
+                derivation_path: DerivationPath::try_new(stdout)?,
             }),
             NixOperation::BuildClosure => {
                 let store_path = StorePath::try_new(stdout)?;
@@ -290,69 +298,14 @@ impl NixBuild {
             }
         }
     }
-}
 
-async fn run_local(program: &str, argv: &[String]) -> Result<String> {
-    let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
-        c.args(argv)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-    });
-    wrap.wrap(ProcessGroup::leader());
-    wrap.wrap(KillOnDrop);
-    let mut child = wrap.spawn()?;
-    let mut stdout = String::new();
-    if let Some(mut s) = child.stdout().take() {
-        s.read_to_string(&mut stdout).await?;
+    fn execution_invocation(&self) -> ProcessInvocation {
+        let nix_invocation = self.nix_invocation();
+        match &self.builder {
+            None => nix_invocation,
+            Some(target) => target.remote_invocation(nix_invocation.to_shell_command()),
+        }
     }
-    let status = child.wait().await?;
-    if !status.success() {
-        return Err(Error::NixFailed {
-            status: status.code().unwrap_or(-1),
-            stderr: "(streamed to terminal — see above)".to_string(),
-        });
-    }
-    Ok(stdout)
-}
-
-async fn run_remote(target: &SshTarget, program: &str, argv: &[String]) -> Result<String> {
-    // OpenSSH joins the trailing argv with single spaces into one
-    // command string the remote $SHELL re-parses. Quote each token
-    // up-front so a value containing whitespace or a shell metachar
-    // survives the round-trip intact.
-    let mut remote_command = shell_quote(program);
-    for arg in argv {
-        remote_command.push(' ');
-        remote_command.push_str(&shell_quote(arg));
-    }
-    run_local(
-        "ssh",
-        &[
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-            target.as_ssh_arg().to_string(),
-            remote_command,
-        ],
-    )
-    .await
-}
-
-/// Single-quote `s` for safe inclusion in a POSIX shell command
-/// line. Returns the input unchanged when every byte is from a
-/// known-safe alphabet (saves visual noise on flag-like args).
-fn shell_quote(s: &str) -> String {
-    let safe = !s.is_empty()
-        && s.bytes().all(|b| {
-            matches!(b,
-                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'
-                | b'-' | b'_' | b'.' | b'/' | b'=' | b':' | b'#' | b'+' | b','
-            )
-        });
-    if safe {
-        return s.to_string();
-    }
-    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 pub struct NixBuilder;

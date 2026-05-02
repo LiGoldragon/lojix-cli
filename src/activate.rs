@@ -1,17 +1,14 @@
 use std::path::Path;
-use std::process::Stdio;
 use std::time::SystemTime;
 
 use horizon_lib::name::{NodeName, UserName};
-use process_wrap::tokio::*;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use crate::build::{HomeMode, SystemAction};
 use crate::cluster::StorePath;
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
+use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun, ShellArgument, ShellCommand};
 
 /// Activate the new closure on the target node.
 ///
@@ -38,24 +35,24 @@ pub struct SystemActivation {
 }
 
 impl SystemActivation {
-    /// (program, argv) for the simple Boot/Switch/Test path.
+    /// Invocation for the simple Boot/Switch/Test path.
     /// Returns an error for `BootOnce` (which uses a different
-    /// shape — `systemd_run_argv`).
-    pub fn ssh_argv(&self) -> Result<(&'static str, Vec<String>)> {
+    /// shape — `systemd_run_invocation`).
+    pub fn ssh_invocation(&self) -> Result<ProcessInvocation> {
         let action_word = match self.action {
             SystemAction::Boot => "boot",
             SystemAction::Switch => "switch",
             SystemAction::Test => "test",
             SystemAction::BootOnce => {
-                return Err(Error::NixFailed {
-                    status: -1,
-                    stderr: "ssh_argv called for BootOnce; use systemd_run_argv".into(),
+                return Err(Error::InvalidSystemActivation {
+                    action: self.action,
+                    reason: "simple ssh invocation requested for BootOnce",
                 });
             }
             other => {
-                return Err(Error::NixFailed {
-                    status: -1,
-                    stderr: format!("activator invoked with non-activating action {other:?}"),
+                return Err(Error::InvalidSystemActivation {
+                    action: other,
+                    reason: "simple ssh invocation requested for non-activating action",
                 });
             }
         };
@@ -68,15 +65,9 @@ impl SystemActivation {
                  && {store}/bin/switch-to-configuration {action_word}"
             )
         };
-        Ok((
-            "ssh",
-            vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                self.target.as_ssh_arg().to_string(),
-                remote_command,
-            ],
-        ))
+        Ok(self
+            .target
+            .remote_invocation(ShellCommand::from_raw(remote_command)))
     }
 
     /// Unique transient unit name for this deploy. Includes a
@@ -110,7 +101,7 @@ impl SystemActivation {
         // the override + body co-located.
         // NEW is derived from `/nix/var/nix/profiles/system`'s
         // target — the canonical source of truth for "the
-        // currently-installed latest gen." Reading NEW from
+        // currently-installed latest generation." Reading NEW from
         // `bootctl status`'s `Default Entry` is unreliable: it
         // reflects the EFI `LoaderEntryDefault` variable, which
         // can hold a stale value from a prior `bootctl
@@ -126,24 +117,24 @@ impl SystemActivation {
              nix-env -p /nix/var/nix/profiles/system --set \"$CLOSURE\"\n\
              \"$CLOSURE/bin/switch-to-configuration\" boot\n\
              SYSTEM_LINK=$(readlink /nix/var/nix/profiles/system)\n\
-             GEN=$(echo \"$SYSTEM_LINK\" | sed -E 's/^system-([0-9]+)-link$/\\1/')\n\
-             NEW=\"nixos-generation-$GEN.conf\"\n\
+             GENERATION=$(echo \"$SYSTEM_LINK\" | sed -E 's/^system-([0-9]+)-link$/\\1/')\n\
+             NEW=\"nixos-generation-$GENERATION.conf\"\n\
              [ -f \"/boot/loader/entries/$NEW\" ]\n\
              [ \"$NEW\" != \"$OLD\" ]\n\
              bootctl set-default \"$OLD\"\n\
              bootctl set-oneshot \"$NEW\"\n\
-             echo \"boot-once: oneshot=$NEW persistent-default=$OLD (=running gen)\"\n",
+             echo \"boot-once: oneshot=$NEW persistent-default=$OLD (=running generation)\"\n",
         )
     }
 
-    /// (program, argv) for the BootOnce ssh call. Wraps the
+    /// Invocation for the BootOnce ssh call. Wraps the
     /// boot-once script in `systemd-run --wait`: ssh holds open
     /// while the unit runs on the target, stdout/stderr stream
     /// back as live feedback, ssh exits with the unit's exit
     /// code. If the ssh dies mid-run, the unit continues to
     /// completion on the target and the deployer recovers via
     /// `ssh root@<target> journalctl -u <unit>.service`.
-    pub fn systemd_run_argv(&self, unit_name: &str) -> (&'static str, Vec<String>) {
+    pub fn systemd_run_invocation(&self, unit_name: &str) -> ProcessInvocation {
         let remote_command = format!(
             "systemd-run \
              --unit={unit_name} \
@@ -151,17 +142,10 @@ impl SystemActivation {
              --wait \
              --service-type=oneshot \
              /bin/sh -c {script}",
-            script = shell_single_quote(&self.boot_once_script()),
+            script = ShellArgument::new(&self.boot_once_script()).to_command_text(),
         );
-        (
-            "ssh",
-            vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                self.target.as_ssh_arg().to_string(),
-                remote_command,
-            ],
-        )
+        self.target
+            .remote_invocation(ShellCommand::from_raw(remote_command))
     }
 
     /// Whether this action's contract includes claiming ownership
@@ -170,61 +154,44 @@ impl SystemActivation {
     /// `switch-to-configuration` but don't touch EFI's
     /// `LoaderEntryDefault` — leaving the door open for a stale
     /// value (e.g. from a prior `BootOnce` that set EFI default
-    /// to a rollback target) to override the just-installed gen
+    /// to a rollback target) to override the just-installed generation
     /// at next boot. We reconcile by explicitly setting EFI
-    /// default to the new gen and clearing any pending one-shot.
+    /// default to the new generation and clearing any pending one-shot.
     /// `Test` is non-persistent and never touches the bootloader.
     /// `BootOnce` is its own thing.
     pub fn requires_efi_reconcile(&self) -> bool {
         matches!(self.action, SystemAction::Boot | SystemAction::Switch)
     }
 
-    /// (program, argv) for the ssh that reads
+    /// Invocation for the ssh that reads
     /// `/nix/var/nix/profiles/system`'s symlink target. Stdout is
     /// captured by the dispatcher, parsed via
-    /// [`parse_gen_number_from_link`] to derive the
+    /// [`SystemProfileLink`] to derive the
     /// `nixos-generation-N.conf` entry name.
-    pub fn step_readlink_system_profile(&self) -> (&'static str, Vec<String>) {
-        (
-            "ssh",
-            vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                self.target.as_ssh_arg().to_string(),
-                "readlink /nix/var/nix/profiles/system".to_string(),
-            ],
-        )
+    pub fn step_readlink_system_profile_invocation(&self) -> ProcessInvocation {
+        self.target.remote_invocation(ShellCommand::from_raw(
+            "readlink /nix/var/nix/profiles/system",
+        ))
     }
 
-    /// (program, argv) for the ssh that points EFI
-    /// `LoaderEntryDefault` at the just-installed gen.
-    pub fn step_set_efi_default(&self, entry: &str) -> (&'static str, Vec<String>) {
-        (
-            "ssh",
-            vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                self.target.as_ssh_arg().to_string(),
-                format!("bootctl set-default {entry}"),
-            ],
-        )
+    /// Invocation for the ssh that points EFI
+    /// `LoaderEntryDefault` at the just-installed generation.
+    pub fn step_set_efi_default_invocation(&self, entry: &BootEntry) -> ProcessInvocation {
+        self.target
+            .remote_invocation(ShellCommand::from_raw(format!(
+                "bootctl set-default {}",
+                entry.as_str()
+            )))
     }
 
-    /// (program, argv) for the ssh that clears EFI
+    /// Invocation for the ssh that clears EFI
     /// `LoaderEntryOneShot`. After `--action boot/switch`, any
     /// pending one-shot from a prior `--action boot-once` would
     /// otherwise consume the next reboot before the user lands
-    /// on the gen they just `--action boot`'d.
-    pub fn step_clear_efi_oneshot(&self) -> (&'static str, Vec<String>) {
-        (
-            "ssh",
-            vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                self.target.as_ssh_arg().to_string(),
-                "bootctl set-oneshot ''".to_string(),
-            ],
-        )
+    /// on the generation they just `--action boot`'d.
+    pub fn step_clear_efi_oneshot_invocation(&self) -> ProcessInvocation {
+        self.target
+            .remote_invocation(ShellCommand::from_raw("bootctl set-oneshot ''"))
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -235,8 +202,9 @@ impl SystemActivation {
     }
 
     async fn run_simple(&self) -> Result<()> {
-        let (program, argv) = self.ssh_argv()?;
-        run_ssh_inherit(program, &argv, "switch-to-configuration").await?;
+        self.ssh_invocation()?
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+            .await?;
         if self.requires_efi_reconcile() {
             self.reconcile_efi().await?;
         }
@@ -244,15 +212,22 @@ impl SystemActivation {
     }
 
     async fn reconcile_efi(&self) -> Result<()> {
-        let (program, argv) = self.step_readlink_system_profile();
-        let link = run_ssh_capture(program, &argv, "read system profile").await?;
-        let generation = parse_gen_number_from_link(link.trim())?;
-        let entry = format!("nixos-generation-{generation}.conf");
-        let (program, argv) = self.step_set_efi_default(&entry);
-        run_ssh_inherit(program, &argv, "set EFI default").await?;
-        let (program, argv) = self.step_clear_efi_oneshot();
-        run_ssh_inherit(program, &argv, "clear EFI oneshot").await?;
-        eprintln!("efi: LoaderEntryDefault={entry}, LoaderEntryOneShot=(cleared)");
+        let output = self
+            .step_readlink_system_profile_invocation()
+            .capture_stdout(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+            .await?;
+        let link = SystemProfileLink::try_new(output.stdout().trim())?;
+        let entry = link.generation()?.boot_entry();
+        self.step_set_efi_default_invocation(&entry)
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+            .await?;
+        self.step_clear_efi_oneshot_invocation()
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+            .await?;
+        eprintln!(
+            "efi: LoaderEntryDefault={}, LoaderEntryOneShot=(cleared)",
+            entry.as_str()
+        );
         Ok(())
     }
 
@@ -267,8 +242,11 @@ impl SystemActivation {
              keeps running — re-attach with: ssh {target} journalctl -u {unit_name}.service",
             target = self.target.as_ssh_arg(),
         );
-        let (program, argv) = self.systemd_run_argv(&unit_name);
-        match run_ssh_inherit(program, &argv, "boot-once unit").await {
+        match self
+            .systemd_run_invocation(&unit_name)
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+            .await
+        {
             Ok(()) => Ok(()),
             Err(error) => {
                 eprintln!(
@@ -291,22 +269,19 @@ pub struct HomeActivation {
 }
 
 impl HomeActivation {
-    pub fn profile_argv(&self, home: &Path) -> (&'static str, Vec<String>) {
-        (
-            "nix-env",
-            vec![
-                "-p".to_string(),
-                home.join(".local/state/nix/profiles/home-manager")
-                    .display()
-                    .to_string(),
-                "--set".to_string(),
-                self.store_path.as_str().to_string(),
-            ],
-        )
+    pub fn profile_invocation(&self, home: &Path) -> ProcessInvocation {
+        ProcessInvocation::new("nix-env").with_arguments([
+            "-p".to_string(),
+            home.join(".local/state/nix/profiles/home-manager")
+                .display()
+                .to_string(),
+            "--set".to_string(),
+            self.store_path.as_str().to_string(),
+        ])
     }
 
-    pub fn activate_argv(&self) -> (String, Vec<String>) {
-        (format!("{}/activate", self.store_path.as_str()), Vec::new())
+    pub fn activate_invocation(&self) -> ProcessInvocation {
+        ProcessInvocation::new(format!("{}/activate", self.store_path.as_str()))
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -323,14 +298,16 @@ impl HomeActivation {
     async fn run_profile(&self) -> Result<()> {
         self.require_local_context().await?;
         let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
-        let (program, argv) = self.profile_argv(Path::new(&home));
-        run_local_inherit(program, &argv, "home profile").await
+        self.profile_invocation(Path::new(&home))
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Nix))
+            .await
     }
 
     async fn run_activate(&self) -> Result<()> {
         self.require_local_context().await?;
-        let (program, argv) = self.activate_argv();
-        run_local_inherit(&program, &argv, "home activate").await
+        self.activate_invocation()
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Nix))
+            .await
     }
 
     async fn require_local_context(&self) -> Result<()> {
@@ -360,14 +337,11 @@ impl HomeActivation {
     }
 
     async fn current_node(&self) -> Result<String> {
-        let output = Command::new("hostname").arg("-s").output().await?;
-        if !output.status.success() {
-            return Err(Error::SshFailed {
-                status: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let output = ProcessInvocation::new("hostname")
+            .with_argument("-s")
+            .capture_stdout(ProcessRun::capture_stderr(ProcessFailure::LocalHostname))
+            .await?;
+        Ok(output.stdout().trim().to_string())
     }
 }
 
@@ -385,94 +359,66 @@ impl Activation {
     }
 }
 
-/// Wrap `s` in single quotes for safe inclusion in a POSIX shell
-/// command line, escaping any embedded single quotes via the
-/// `'\''` idiom.
-fn shell_single_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemProfileLink(String);
+
+impl SystemProfileLink {
+    pub fn try_new(link: impl Into<String>) -> Result<Self> {
+        let link = link.into();
+        let stripped = link
+            .strip_prefix("system-")
+            .and_then(|rest| rest.strip_suffix("-link"));
+        if stripped
+            .and_then(|number| number.parse::<u64>().ok())
+            .is_some()
+        {
+            Ok(Self(link))
+        } else {
+            Err(Error::InvalidSystemProfileLink { got: link })
+        }
+    }
+
+    pub fn generation(&self) -> Result<SystemGeneration> {
+        let number = self
+            .0
+            .strip_prefix("system-")
+            .and_then(|rest| rest.strip_suffix("-link"))
+            .and_then(|number| number.parse::<u64>().ok())
+            .ok_or_else(|| Error::InvalidSystemProfileLink {
+                got: self.0.clone(),
+            })?;
+        Ok(SystemGeneration(number))
+    }
 }
 
-/// Extract the integer N from a `system-N-link` string — the shape
-/// `/nix/var/nix/profiles/system` resolves to via `readlink`. The
-/// caller composes `nixos-generation-{N}.conf` from the result.
-pub fn parse_gen_number_from_link(link: &str) -> Result<u64> {
-    let stripped = link
-        .strip_prefix("system-")
-        .and_then(|rest| rest.strip_suffix("-link"));
-    match stripped.and_then(|s| s.parse::<u64>().ok()) {
-        Some(n) => Ok(n),
-        None => Err(Error::SshFailed {
-            status: -1,
-            stderr: format!(
-                "expected /nix/var/nix/profiles/system to symlink to \
-                 system-<N>-link; got {link:?}"
-            ),
-        }),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemGeneration(u64);
+
+impl SystemGeneration {
+    pub fn new(number: u64) -> Self {
+        Self(number)
+    }
+
+    pub fn number(self) -> u64 {
+        self.0
+    }
+
+    pub fn boot_entry(self) -> BootEntry {
+        BootEntry(format!("nixos-generation-{}.conf", self.0))
     }
 }
 
-async fn run_ssh_capture(program: &str, argv: &[String], label: &str) -> Result<String> {
-    let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
-        c.args(argv)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-    });
-    wrap.wrap(ProcessGroup::leader());
-    wrap.wrap(KillOnDrop);
-    let mut child = wrap.spawn()?;
-    let mut stdout = String::new();
-    if let Some(mut s) = child.stdout().take() {
-        s.read_to_string(&mut stdout).await?;
-    }
-    let status = child.wait().await?;
-    if !status.success() {
-        return Err(Error::SshFailed {
-            status: status.code().unwrap_or(-1),
-            stderr: format!("{label}: ssh non-zero exit"),
-        });
-    }
-    Ok(stdout)
-}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootEntry(String);
 
-async fn run_ssh_inherit(program: &str, argv: &[String], label: &str) -> Result<()> {
-    let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
-        c.args(argv)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-    });
-    wrap.wrap(ProcessGroup::leader());
-    wrap.wrap(KillOnDrop);
-    let mut child = wrap.spawn()?;
-    let status = child.wait().await?;
-    if !status.success() {
-        return Err(Error::SshFailed {
-            status: status.code().unwrap_or(-1),
-            stderr: format!("{label}: ssh non-zero exit (see streamed output)"),
-        });
+impl BootEntry {
+    pub fn new(entry: impl Into<String>) -> Self {
+        Self(entry.into())
     }
-    Ok(())
-}
 
-async fn run_local_inherit(program: &str, argv: &[String], label: &str) -> Result<()> {
-    let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
-        c.args(argv)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-    });
-    wrap.wrap(ProcessGroup::leader());
-    wrap.wrap(KillOnDrop);
-    let mut child = wrap.spawn()?;
-    let status = child.wait().await?;
-    if !status.success() {
-        return Err(Error::NixFailed {
-            status: status.code().unwrap_or(-1),
-            stderr: format!("{label}: non-zero exit (see streamed output)"),
-        });
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
-    Ok(())
 }
 
 pub struct Activator;

@@ -1,14 +1,11 @@
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use horizon_lib::name::CriomeDomainName;
 use horizon_lib::node::Node;
-use process_wrap::tokio::*;
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use crate::cluster::OverrideUri;
-use crate::error::{Error, Result};
+use crate::error::Result;
+use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun, ShellCommand};
 
 /// `root@<node>.<cluster>.criome` — the addressing used by `ssh`,
 /// `nix copy --to ssh-ng://…`, and `--from ssh-ng://…`. Constructed
@@ -33,6 +30,15 @@ impl SshTarget {
     pub fn as_ssh_arg(&self) -> &str {
         &self.0
     }
+
+    pub fn remote_invocation(&self, remote_command: ShellCommand) -> ProcessInvocation {
+        ProcessInvocation::new("ssh").with_arguments([
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+            self.as_ssh_arg().to_string(),
+            remote_command.as_str().to_string(),
+        ])
+    }
 }
 
 /// A scratch directory on a remote host into which override-input
@@ -48,24 +54,18 @@ pub struct RemoteStaging {
 
 impl RemoteStaging {
     pub async fn try_create(target: SshTarget) -> Result<Self> {
-        let output = Command::new("ssh")
-            .args([
-                "-o",
-                "BatchMode=yes",
-                target.as_ssh_arg(),
-                "mktemp",
-                "-d",
-                "/tmp/lojix-stage.XXXXXX",
+        let output = ProcessInvocation::new("ssh")
+            .with_arguments([
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                target.as_ssh_arg().to_string(),
+                "mktemp".to_string(),
+                "-d".to_string(),
+                "/tmp/lojix-stage.XXXXXX".to_string(),
             ])
-            .output()
+            .capture_stdout(ProcessRun::capture_stderr(ProcessFailure::Ssh))
             .await?;
-        if !output.status.success() {
-            return Err(Error::SshFailed {
-                status: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-        let remote_root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        let remote_root = PathBuf::from(output.stdout().trim().to_string());
         Ok(Self {
             target,
             remote_root,
@@ -76,65 +76,50 @@ impl RemoteStaging {
     /// the remote, returning an `OverrideUri` that resolves to the
     /// remote path. The URI string is interpreted by `nix` running
     /// on the *remote*, where the path now exists.
-    pub async fn rsync(&self, local_dir: &Path, name: &str) -> Result<OverrideUri> {
-        let remote_path = self.remote_root.join(name);
+    pub async fn rsync(&self, request: RemoteRsync<'_>) -> Result<OverrideUri> {
+        let remote_path = self.remote_root.join(request.name);
         // rsync expects a trailing slash on the source for "copy
         // contents into target dir" semantics. Build the spec
         // explicitly to avoid path-display ambiguity.
-        let mut source = local_dir.as_os_str().to_os_string();
+        let mut source = request.local_dir.as_os_str().to_os_string();
         source.push("/");
-        let dest = format!("{}:{}/", self.target.as_ssh_arg(), remote_path.display(),);
-        let mut wrap = CommandWrap::with_new("rsync", |c: &mut Command| {
-            c.arg("-a")
-                .arg("--delete")
-                .arg("--mkpath")
-                .arg("-e")
-                .arg("ssh -o BatchMode=yes")
-                .arg(&source)
-                .arg(&dest)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-        });
-        wrap.wrap(ProcessGroup::leader());
-        wrap.wrap(KillOnDrop);
-        let mut child = wrap.spawn()?;
-        let mut stderr = String::new();
-        if let Some(mut s) = child.stderr().take() {
-            s.read_to_string(&mut stderr).await?;
-        }
-        let status = child.wait().await?;
-        if !status.success() {
-            return Err(Error::RsyncFailed {
-                status: status.code().unwrap_or(-1),
-                stderr,
-            });
-        }
+        let destination = format!("{}:{}/", self.target.as_ssh_arg(), remote_path.display(),);
+        ProcessInvocation::new("rsync")
+            .with_arguments([
+                "-a".to_string(),
+                "--delete".to_string(),
+                "--mkpath".to_string(),
+                "-e".to_string(),
+                "ssh -o BatchMode=yes".to_string(),
+                source.to_string_lossy().to_string(),
+                destination,
+            ])
+            .capture_stdout(ProcessRun::capture_stderr(ProcessFailure::Rsync))
+            .await?;
         Ok(OverrideUri::from_local_path(&remote_path))
     }
 
     pub async fn cleanup(self) -> Result<()> {
-        let output = Command::new("ssh")
-            .args([
-                "-o",
-                "BatchMode=yes",
-                self.target.as_ssh_arg(),
-                "rm",
-                "-rf",
-                &self.remote_root.display().to_string(),
+        ProcessInvocation::new("ssh")
+            .with_arguments([
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+                self.target.as_ssh_arg().to_string(),
+                "rm".to_string(),
+                "-rf".to_string(),
+                self.remote_root.display().to_string(),
             ])
-            .output()
+            .capture_stdout(ProcessRun::capture_stderr(ProcessFailure::Ssh))
             .await?;
-        if !output.status.success() {
-            return Err(Error::SshFailed {
-                status: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
         Ok(())
     }
 
     pub fn target(&self) -> &SshTarget {
         &self.target
     }
+}
+
+pub struct RemoteRsync<'request> {
+    pub local_dir: &'request Path,
+    pub name: &'request str,
 }

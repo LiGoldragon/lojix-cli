@@ -6,6 +6,7 @@ pub mod copy;
 pub mod deploy;
 pub mod error;
 pub mod host;
+pub mod process;
 pub mod project;
 pub mod proposal;
 pub mod request;

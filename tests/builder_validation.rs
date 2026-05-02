@@ -36,17 +36,17 @@ fn unknown_builder_fails_with_unknown_builder_error() {
     }
     // tiger is a real cluster member; "definitely-not-a-node" is
     // not. Validation should fail at horizon-resolution time.
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
         .args(eval_request_arguments("tiger", "definitely-not-a-node"))
         .output()
         .expect("spawn lojix-cli");
 
     assert!(
-        !out.status.success(),
+        !output.status.success(),
         "expected nonzero exit on unknown builder; stdout: {}",
-        String::from_utf8_lossy(&out.stdout)
+        String::from_utf8_lossy(&output.stdout)
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("not found in horizon ex_nodes"),
         "expected UnknownBuilder message, got stderr: {stderr}"
@@ -69,12 +69,12 @@ fn builder_equals_node_resolves_against_viewpoint_node() {
     // ssh occurs — successful exit means resolution + projection
     // both worked. prom is `is_builder=true` per goldragon's
     // datom (LargeAiRouter, size=Max, trust=Max, base pubkeys).
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
         .args(eval_request_arguments("prometheus", "prometheus"))
         .output()
         .expect("spawn lojix-cli");
 
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     // The eval may fail at the actual ssh step (no live prom in
     // CI), but it must NOT fail with UnknownBuilder — that's the
     // bug this regression test guards. InvalidBuilder is also a
@@ -99,17 +99,17 @@ fn non_builder_node_fails_with_invalid_builder_error() {
     // species, Min size — fails the size>=med && is_fully_trusted
     // gates in horizon-rs's projection). Validation should reject
     // it specifically, not silently fall back.
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
         .args(eval_request_arguments("tiger", "balboa"))
         .output()
         .expect("spawn lojix-cli");
 
     assert!(
-        !out.status.success(),
+        !output.status.success(),
         "expected nonzero exit on non-builder; stdout: {}",
-        String::from_utf8_lossy(&out.stdout)
+        String::from_utf8_lossy(&output.stdout)
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("not a valid builder"),
         "expected InvalidBuilder message, got stderr: {stderr}"

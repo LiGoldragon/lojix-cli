@@ -1,5 +1,5 @@
 //! Wire-shape tests for the three pipeline phases. Asserts the
-//! exact argv that hits `nix` / `nix copy` / `ssh` so a future
+//! exact arguments that hit `nix` / `nix copy` / `ssh` so a future
 //! regression on the address derivation or activation command is
 //! caught without depending on a live deploy.
 
@@ -7,8 +7,8 @@ use std::path::Path;
 
 use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName, UserName};
 
-use lojix_cli::activate::{HomeActivation, SystemActivation, parse_gen_number_from_link};
-use lojix_cli::build::{BuildLocation, BuildPlan, HomeMode, NixBuild, SystemAction};
+use lojix_cli::activate::{BootEntry, HomeActivation, SystemActivation, SystemProfileLink};
+use lojix_cli::build::{BuildLocation, BuildPlan, HomeBuildPlan, HomeMode, NixBuild, SystemAction};
 use lojix_cli::cluster::{FlakeRef, OverrideUri, StorePath};
 use lojix_cli::copy::ClosureCopy;
 use lojix_cli::host::SshTarget;
@@ -20,7 +20,7 @@ fn target_for(node: &str, cluster: &str) -> SshTarget {
     SshTarget::from_criome_domain(&domain)
 }
 
-fn nix_build_argv_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<String> {
+fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<String> {
     let build = NixBuild {
         flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
         horizon_uri: OverrideUri::from_local_path(Path::new("/cache/horizon")),
@@ -29,49 +29,62 @@ fn nix_build_argv_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<String
         plan,
         builder,
     };
-    let (program, argv) = build.nix_argv();
-    assert_eq!(program, "nix");
-    argv
+    let invocation = build.nix_invocation();
+    assert_eq!(invocation.program(), "nix");
+    invocation.arguments().to_vec()
 }
 
 #[test]
-fn nix_build_argv_contains_target_attr_and_overrides() {
-    let argv = nix_build_argv_for(BuildPlan::full_os(SystemAction::Boot), None);
-    assert_eq!(argv[0], "build");
-    assert!(argv.iter().any(|a| a.contains(
+fn nix_build_arguments_contain_target_attr_and_overrides() {
+    let arguments = nix_build_arguments_for(BuildPlan::full_os(SystemAction::Boot), None);
+    assert_eq!(arguments[0], "build");
+    assert!(arguments.iter().any(|argument| argument.contains(
         "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.system.build.toplevel"
     )));
-    let i = argv
+    let horizon_index = arguments
         .iter()
-        .position(|a| a == "horizon")
+        .position(|argument| argument == "horizon")
         .expect("horizon flag");
-    assert_eq!(argv[i + 1], "path:/cache/horizon");
-    let j = argv
+    assert_eq!(arguments[horizon_index + 1], "path:/cache/horizon");
+    let system_index = arguments
         .iter()
-        .position(|a| a == "system")
+        .position(|argument| argument == "system")
         .expect("system flag");
-    assert_eq!(argv[j + 1], "path:/cache/system");
-    let k = argv
+    assert_eq!(arguments[system_index + 1], "path:/cache/system");
+    let deployment_index = arguments
         .iter()
-        .position(|a| a == "deployment")
+        .position(|argument| argument == "deployment")
         .expect("deployment flag");
-    assert_eq!(argv[k + 1], "path:/cache/deployment/home-on");
+    assert_eq!(
+        arguments[deployment_index + 1],
+        "path:/cache/deployment/home-on"
+    );
 }
 
 #[test]
-fn nix_eval_argv_uses_eval_operation_and_drvpath_attr() {
-    let argv = nix_build_argv_for(BuildPlan::full_os(SystemAction::Eval), None);
-    assert_eq!(argv[0], "eval");
-    assert!(argv.contains(&"--raw".to_string()));
-    assert!(argv.iter().any(|a| a.ends_with(".drvPath")));
+fn nix_eval_arguments_use_eval_operation_and_derivation_path_attr() {
+    let arguments = nix_build_arguments_for(BuildPlan::full_os(SystemAction::Eval), None);
+    assert_eq!(arguments[0], "eval");
+    assert!(arguments.contains(&"--raw".to_string()));
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument.ends_with(".drvPath"))
+    );
 }
 
 #[test]
-fn nix_home_build_argv_uses_home_activation_package_attr() {
+fn nix_home_build_arguments_use_home_activation_package_attr() {
     let user = UserName::try_new("li").unwrap();
-    let argv = nix_build_argv_for(BuildPlan::home_only(user, HomeMode::Build), None);
-    assert_eq!(argv[0], "build");
-    assert!(argv.iter().any(|a| a.contains(
+    let arguments = nix_build_arguments_for(
+        BuildPlan::home_only(HomeBuildPlan {
+            user,
+            mode: HomeMode::Build,
+        }),
+        None,
+    );
+    assert_eq!(arguments[0], "build");
+    assert!(arguments.iter().any(|argument| argument.contains(
         "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.home-manager.users.li.home.activationPackage"
     )));
 }
@@ -94,7 +107,7 @@ fn closure_copy_skips_when_builder_equals_target() {
         source: BuildLocation::Builder(same_builder),
         target,
     };
-    assert!(copy.argv().is_none(), "no copy when source == target");
+    assert!(copy.invocation().is_none(), "no copy when source == target");
 }
 
 #[test]
@@ -105,13 +118,20 @@ fn closure_copy_dispatcher_to_target_uses_to_only() {
         source: BuildLocation::Dispatcher,
         target,
     };
-    let (program, argv) = copy.argv().expect("copy needed");
-    assert_eq!(program, "nix");
-    assert_eq!(argv[0], "copy");
-    assert!(!argv.iter().any(|a| a == "--from"));
-    let i = argv.iter().position(|a| a == "--to").expect("--to flag");
-    assert_eq!(argv[i + 1], "ssh-ng://root@zeus.goldragon.criome");
-    assert_eq!(argv.last().unwrap(), "/nix/store/abc-toplevel");
+    let invocation = copy.invocation().expect("copy needed");
+    assert_eq!(invocation.program(), "nix");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[0], "copy");
+    assert!(!arguments.iter().any(|argument| argument == "--from"));
+    let target_index = arguments
+        .iter()
+        .position(|argument| argument == "--to")
+        .expect("--to flag");
+    assert_eq!(
+        arguments[target_index + 1],
+        "ssh-ng://root@zeus.goldragon.criome"
+    );
+    assert_eq!(arguments.last().unwrap(), "/nix/store/abc-toplevel");
 }
 
 #[test]
@@ -123,14 +143,24 @@ fn closure_copy_third_party_builder_uses_from_and_to() {
         source: BuildLocation::Builder(builder),
         target,
     };
-    let (_, argv) = copy.argv().expect("copy needed");
-    let i = argv
+    let invocation = copy.invocation().expect("copy needed");
+    let arguments = invocation.arguments();
+    let source_index = arguments
         .iter()
-        .position(|a| a == "--from")
+        .position(|argument| argument == "--from")
         .expect("--from flag");
-    assert_eq!(argv[i + 1], "ssh-ng://root@prometheus.goldragon.criome");
-    let j = argv.iter().position(|a| a == "--to").expect("--to flag");
-    assert_eq!(argv[j + 1], "ssh-ng://root@zeus.goldragon.criome");
+    assert_eq!(
+        arguments[source_index + 1],
+        "ssh-ng://root@prometheus.goldragon.criome"
+    );
+    let target_index = arguments
+        .iter()
+        .position(|argument| argument == "--to")
+        .expect("--to flag");
+    assert_eq!(
+        arguments[target_index + 1],
+        "ssh-ng://root@zeus.goldragon.criome"
+    );
 }
 
 #[test]
@@ -141,12 +171,13 @@ fn activation_boot_includes_profile_set_and_switch_to_configuration() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Boot,
     };
-    let (program, argv) = activation.ssh_argv().unwrap();
-    assert_eq!(program, "ssh");
-    assert_eq!(argv[0], "-o");
-    assert_eq!(argv[1], "BatchMode=yes");
-    assert_eq!(argv[2], "root@zeus.goldragon.criome");
-    let remote = &argv[3];
+    let invocation = activation.ssh_invocation().unwrap();
+    assert_eq!(invocation.program(), "ssh");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[0], "-o");
+    assert_eq!(arguments[1], "BatchMode=yes");
+    assert_eq!(arguments[2], "root@zeus.goldragon.criome");
+    let remote = &arguments[3];
     assert!(
         remote.contains("nix-env -p /nix/var/nix/profiles/system --set /nix/store/abc-toplevel")
     );
@@ -161,8 +192,9 @@ fn activation_test_skips_profile_set() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Test,
     };
-    let (_, argv) = activation.ssh_argv().unwrap();
-    let remote = &argv[3];
+    let invocation = activation.ssh_invocation().unwrap();
+    let arguments = invocation.arguments();
+    let remote = &arguments[3];
     assert!(
         !remote.contains("nix-env"),
         "test action must not touch the system profile"
@@ -178,10 +210,11 @@ fn boot_once_systemd_run_uses_wait_collect_and_oneshot_service_type() {
         action: SystemAction::BootOnce,
     };
     let unit = "lojix-boot-once-test-fixture";
-    let (program, argv) = activation.systemd_run_argv(unit);
-    assert_eq!(program, "ssh");
-    assert_eq!(argv[2], "root@prometheus.goldragon.criome");
-    let remote = &argv[3];
+    let invocation = activation.systemd_run_invocation(unit);
+    assert_eq!(invocation.program(), "ssh");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[2], "root@prometheus.goldragon.criome");
+    let remote = &arguments[3];
     assert!(
         remote.contains("systemd-run"),
         "must use systemd-run; got: {remote}"
@@ -213,7 +246,7 @@ fn boot_once_script_uses_current_entry_as_rollback_target() {
         action: SystemAction::BootOnce,
     };
     let script = activation.boot_once_script();
-    // OLD captures the *currently-running* gen via bootctl
+    // OLD captures the *currently-running* generation via bootctl
     // status's Current Entry field — not /boot/loader/loader.conf's
     // default line, which can hold a stale "next intended boot"
     // from an earlier nixos-rebuild boot.
@@ -226,7 +259,7 @@ fn boot_once_script_uses_current_entry_as_rollback_target() {
         "must not read loader.conf default (stale-state hazard); got:\n{script}"
     );
     // Closure pinned by absolute path, switch-to-configuration
-    // boot installs the new gen, then default reverts to OLD and
+    // boot installs the new generation, then default reverts to OLD and
     // oneshot is armed to NEW.
     assert!(script.contains("CLOSURE='/nix/store/abc-toplevel'"));
     assert!(script.contains("\"$CLOSURE/bin/switch-to-configuration\" boot"));
@@ -279,17 +312,17 @@ fn boot_once_script_seeds_path_for_systemd_transient_unit() {
 }
 
 #[test]
-fn boot_once_ssh_argv_returns_error_directing_caller_to_systemd_run() {
+fn boot_once_ssh_invocation_returns_error_directing_caller_to_systemd_run() {
     let activation = SystemActivation {
         target: target_for("prometheus", "goldragon"),
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::BootOnce,
     };
-    // BootOnce uses systemd_run_argv, not the simple ssh_argv;
+    // BootOnce uses systemd_run_invocation, not the simple ssh_invocation;
     // misuse-of-API safeguard.
     assert!(
-        activation.ssh_argv().is_err(),
-        "ssh_argv must refuse for BootOnce"
+        activation.ssh_invocation().is_err(),
+        "ssh_invocation must refuse for BootOnce"
     );
 }
 
@@ -301,8 +334,9 @@ fn activation_switch_includes_profile_set() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Switch,
     };
-    let (_, argv) = activation.ssh_argv().unwrap();
-    let remote = &argv[3];
+    let invocation = activation.ssh_invocation().unwrap();
+    let arguments = invocation.arguments();
+    let remote = &arguments[3];
     assert!(remote.contains("nix-env -p /nix/var/nix/profiles/system --set"));
     assert!(remote.contains("switch-to-configuration switch"));
 }
@@ -315,12 +349,16 @@ fn home_profile_activation_sets_home_manager_profile() {
         store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
         mode: HomeMode::Profile,
     };
-    let (program, argv) = activation.profile_argv(Path::new("/home/li"));
-    assert_eq!(program, "nix-env");
-    assert_eq!(argv[0], "-p");
-    assert_eq!(argv[1], "/home/li/.local/state/nix/profiles/home-manager");
-    assert_eq!(argv[2], "--set");
-    assert_eq!(argv[3], "/nix/store/abc-home-manager-generation");
+    let invocation = activation.profile_invocation(Path::new("/home/li"));
+    assert_eq!(invocation.program(), "nix-env");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[0], "-p");
+    assert_eq!(
+        arguments[1],
+        "/home/li/.local/state/nix/profiles/home-manager"
+    );
+    assert_eq!(arguments[2], "--set");
+    assert_eq!(arguments[3], "/nix/store/abc-home-manager-generation");
 }
 
 #[test]
@@ -331,9 +369,12 @@ fn home_activate_runs_activation_script_from_generation() {
         store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
         mode: HomeMode::Activate,
     };
-    let (program, argv) = activation.activate_argv();
-    assert_eq!(program, "/nix/store/abc-home-manager-generation/activate");
-    assert!(argv.is_empty());
+    let invocation = activation.activate_invocation();
+    assert_eq!(
+        invocation.program(),
+        "/nix/store/abc-home-manager-generation/activate"
+    );
+    assert!(invocation.arguments().is_empty());
 }
 
 #[test]
@@ -367,10 +408,11 @@ fn efi_reconcile_readlink_targets_system_profile() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Boot,
     };
-    let (program, argv) = activation.step_readlink_system_profile();
-    assert_eq!(program, "ssh");
-    assert_eq!(argv[2], "root@prometheus.goldragon.criome");
-    assert_eq!(argv[3], "readlink /nix/var/nix/profiles/system");
+    let invocation = activation.step_readlink_system_profile_invocation();
+    assert_eq!(invocation.program(), "ssh");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[2], "root@prometheus.goldragon.criome");
+    assert_eq!(arguments[3], "readlink /nix/var/nix/profiles/system");
 }
 
 #[test]
@@ -380,8 +422,10 @@ fn efi_reconcile_set_default_passes_entry_id_through() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Boot,
     };
-    let (_, argv) = activation.step_set_efi_default("nixos-generation-33.conf");
-    assert_eq!(argv[3], "bootctl set-default nixos-generation-33.conf");
+    let entry = BootEntry::new("nixos-generation-33.conf");
+    let invocation = activation.step_set_efi_default_invocation(&entry);
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[3], "bootctl set-default nixos-generation-33.conf");
 }
 
 #[test]
@@ -391,34 +435,53 @@ fn efi_reconcile_clear_oneshot_uses_empty_string_argument() {
         store_path: StorePath::try_new("/nix/store/abc-toplevel").unwrap(),
         action: SystemAction::Boot,
     };
-    let (_, argv) = activation.step_clear_efi_oneshot();
+    let invocation = activation.step_clear_efi_oneshot_invocation();
+    let arguments = invocation.arguments();
     // Empty string clears the EFI variable per `bootctl(1)`. The
     // POSIX shell on the remote re-parses `bootctl set-oneshot ''`
-    // as three argv tokens with the third being the empty string;
+    // as three argument tokens with the third being the empty string;
     // bootctl reads that and unsets LoaderEntryOneShot.
-    assert_eq!(argv[3], "bootctl set-oneshot ''");
+    assert_eq!(arguments[3], "bootctl set-oneshot ''");
 }
 
 #[test]
-fn parse_gen_number_from_link_extracts_n_from_system_n_link() {
-    assert_eq!(parse_gen_number_from_link("system-33-link").unwrap(), 33);
-    assert_eq!(parse_gen_number_from_link("system-1-link").unwrap(), 1);
+fn system_profile_link_extracts_generation_number() {
     assert_eq!(
-        parse_gen_number_from_link("system-12345-link").unwrap(),
+        SystemProfileLink::try_new("system-33-link")
+            .unwrap()
+            .generation()
+            .unwrap()
+            .number(),
+        33
+    );
+    assert_eq!(
+        SystemProfileLink::try_new("system-1-link")
+            .unwrap()
+            .generation()
+            .unwrap()
+            .number(),
+        1
+    );
+    assert_eq!(
+        SystemProfileLink::try_new("system-12345-link")
+            .unwrap()
+            .generation()
+            .unwrap()
+            .number(),
         12345
     );
 }
 
 #[test]
-fn parse_gen_number_from_link_rejects_malformed_inputs() {
+fn system_profile_link_rejects_malformed_inputs() {
     // Wrong prefix.
-    assert!(parse_gen_number_from_link("home-33-link").is_err());
+    assert!(SystemProfileLink::try_new("home-33-link").is_err());
     // Missing -link suffix.
-    assert!(parse_gen_number_from_link("system-33").is_err());
+    assert!(SystemProfileLink::try_new("system-33").is_err());
     // Non-numeric.
-    assert!(parse_gen_number_from_link("system-abc-link").is_err());
+    assert!(SystemProfileLink::try_new("system-abc-link").is_err());
     // Empty.
-    assert!(parse_gen_number_from_link("").is_err());
+    assert!(SystemProfileLink::try_new("").is_err());
     // Negative is not supported (u64).
-    assert!(parse_gen_number_from_link("system--1-link").is_err());
+    assert!(SystemProfileLink::try_new("system--1-link").is_err());
 }

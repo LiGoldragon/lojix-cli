@@ -1,13 +1,10 @@
-use std::process::Stdio;
-
-use process_wrap::tokio::*;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use tokio::process::Command;
 
 use crate::build::BuildLocation;
 use crate::cluster::StorePath;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::host::SshTarget;
+use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
 /// Move a closure from wherever the build phase landed it to the
 /// activation target.
@@ -27,44 +24,30 @@ pub struct ClosureCopy {
 }
 
 impl ClosureCopy {
-    /// `Some((program, argv))` if a copy is needed, `None` if the
+    /// `Some(invocation)` if a copy is needed, `None` if the
     /// closure already lives on the target. Pure.
-    pub fn argv(&self) -> Option<(&'static str, Vec<String>)> {
+    pub fn invocation(&self) -> Option<ProcessInvocation> {
         if self.source_matches_target() {
             return None;
         }
-        let mut argv: Vec<String> = vec!["copy".to_string()];
+        let mut arguments: Vec<String> = vec!["copy".to_string()];
         if let BuildLocation::Builder(builder) = &self.source {
-            argv.push("--from".to_string());
-            argv.push(builder.ssh_uri());
+            arguments.push("--from".to_string());
+            arguments.push(builder.ssh_uri());
         }
-        argv.push("--to".to_string());
-        argv.push(self.target.ssh_uri());
-        argv.push(self.store_path.as_str().to_string());
-        Some(("nix", argv))
+        arguments.push("--to".to_string());
+        arguments.push(self.target.ssh_uri());
+        arguments.push(self.store_path.as_str().to_string());
+        Some(ProcessInvocation::new("nix").with_arguments(arguments))
     }
 
     pub async fn run(&self) -> Result<()> {
-        let Some((program, argv)) = self.argv() else {
+        let Some(invocation) = self.invocation() else {
             return Ok(());
         };
-        let mut wrap = CommandWrap::with_new(program, |c: &mut Command| {
-            c.args(&argv)
-                .stdin(Stdio::null())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit());
-        });
-        wrap.wrap(ProcessGroup::leader());
-        wrap.wrap(KillOnDrop);
-        let mut child = wrap.spawn()?;
-        let status = child.wait().await?;
-        if !status.success() {
-            return Err(Error::NixFailed {
-                status: status.code().unwrap_or(-1),
-                stderr: "(nix copy — see streamed output)".to_string(),
-            });
-        }
-        Ok(())
+        invocation
+            .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Nix))
+            .await
     }
 
     fn source_matches_target(&self) -> bool {

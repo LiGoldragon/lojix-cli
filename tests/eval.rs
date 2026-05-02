@@ -10,12 +10,12 @@ fn eval_goldragon_tiger_runs_pipeline_to_nix() {
         return;
     }
 
-    let out = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
+    let output = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
         .args(eval_request_arguments())
         .output()
         .expect("spawn lojix");
 
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
     let horizon_dir = dirs_cache_lojix()
         .join("horizon")
@@ -42,9 +42,9 @@ fn eval_goldragon_tiger_runs_pipeline_to_nix() {
         "deployment flake.nix should exist in {deployment_dir:?}",
     );
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        out.status.success(),
+        output.status.success(),
         "lojix eval should succeed end-to-end; stdout: {stdout} stderr: {stderr}",
     );
     assert!(
@@ -118,10 +118,10 @@ fn skip_local_eval_smoke_test() -> bool {
 }
 
 fn nar_hash_of(dir: &std::path::Path) -> String {
-    let out = Command::new("nix")
+    let output = Command::new("nix")
         .args(["hash", "path", "--type", "sha256", "--sri"])
         .arg(dir)
         .output()
         .expect("spawn nix hash");
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }

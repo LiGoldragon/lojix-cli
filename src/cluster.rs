@@ -68,14 +68,14 @@ impl OverrideUri {
 pub struct NarHashSri(String);
 
 impl NarHashSri {
-    pub fn try_new(s: impl Into<String>) -> Result<Self> {
-        let s = s.into();
-        if s.starts_with("sha256-") {
-            Ok(Self(s))
+    pub fn try_new(text: impl Into<String>) -> Result<Self> {
+        let text = text.into();
+        if text.starts_with("sha256-") {
+            Ok(Self(text))
         } else {
             Err(Error::InvalidName {
                 kind: "NarHashSri (must start with sha256-)",
-                got: s,
+                got: text,
             })
         }
     }
@@ -92,15 +92,40 @@ impl NarHashSri {
 pub struct StorePath(String);
 
 impl StorePath {
-    pub fn try_new(s: impl Into<String>) -> Result<Self> {
-        let s = s.into();
-        let trimmed = s.trim();
+    pub fn try_new(text: impl Into<String>) -> Result<Self> {
+        let text = text.into();
+        let trimmed = text.trim();
         if trimmed.starts_with("/nix/store/") && !trimmed.contains('\n') {
             Ok(Self(trimmed.to_string()))
         } else {
             Err(Error::InvalidName {
                 kind: "StorePath (must start with /nix/store/ and be one line)",
-                got: s,
+                got: text,
+            })
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivationPath(String);
+
+impl DerivationPath {
+    pub fn try_new(text: impl Into<String>) -> Result<Self> {
+        let text = text.into();
+        let trimmed = text.trim();
+        if trimmed.starts_with("/nix/store/")
+            && trimmed.ends_with(".drv")
+            && !trimmed.contains('\n')
+        {
+            Ok(Self(trimmed.to_string()))
+        } else {
+            Err(Error::InvalidName {
+                kind: "DerivationPath (must be one /nix/store/*.drv path)",
+                got: text,
             })
         }
     }

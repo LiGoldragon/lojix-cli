@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use horizon_lib::name::{ClusterName, NodeName, UserName};
 use tempfile::NamedTempFile;
 
-use lojix_cli::build::{BuildPlan, HomeMode, SystemAction};
+use lojix_cli::build::{BuildPlan, HomeBuildPlan, HomeMode, SystemAction};
 use lojix_cli::cluster::{FlakeRef, ProposalSource};
 use lojix_cli::request::{CommandLine, FullOs, HomeOnly, LojixRequest, OsOnly};
 
@@ -172,6 +172,9 @@ fn home_record_maps_to_home_plan() {
 
     assert_eq!(
         request.plan,
-        BuildPlan::home_only(user_name("li"), HomeMode::Activate)
+        BuildPlan::home_only(HomeBuildPlan {
+            user: user_name("li"),
+            mode: HomeMode::Activate,
+        })
     );
 }

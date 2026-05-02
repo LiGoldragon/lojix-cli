@@ -25,6 +25,18 @@ pub enum Error {
     #[error("ssh failed (exit {status}): {stderr}")]
     SshFailed { status: i32, stderr: String },
 
+    #[error("local hostname command failed (exit {status}): {stderr}")]
+    LocalHostnameFailed { status: i32, stderr: String },
+
+    #[error("invalid system activation for {action:?}: {reason}")]
+    InvalidSystemActivation {
+        action: crate::build::SystemAction,
+        reason: &'static str,
+    },
+
+    #[error("invalid system profile link: {got:?}")]
+    InvalidSystemProfileLink { got: String },
+
     #[error("builder node {0} not found in horizon ex_nodes")]
     UnknownBuilder(NodeName),
 
@@ -64,6 +76,12 @@ pub enum Error {
 
     #[error("ractor: {0}")]
     Ractor(String),
+
+    #[error("actor rpc failed: {reason}")]
+    ActorRpcFailed { reason: &'static str },
+
+    #[error("actor messaging failed: {message}")]
+    ActorMessagingFailed { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

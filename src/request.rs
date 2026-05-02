@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use horizon_lib::name::{ClusterName, NodeName, UserName};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 
-use crate::build::{BuildPlan, HomeMode, SystemAction};
+use crate::build::{BuildPlan, HomeBuildPlan, HomeMode, SystemAction};
 use crate::cluster::{FlakeRef, ProposalSource};
 use crate::deploy::DeployRequest;
 use crate::error::{Error, Result};
@@ -102,7 +102,10 @@ impl HomeOnly {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
-            plan: BuildPlan::home_only(self.user, self.mode),
+            plan: BuildPlan::home_only(HomeBuildPlan {
+                user: self.user,
+                mode: self.mode,
+            }),
             source: self.source,
             criomos: self.criomos,
         }
@@ -156,7 +159,7 @@ impl CommandLine {
 
     pub fn decode_request(&self) -> Result<LojixRequest> {
         match self.arguments.first() {
-            Some(first) if starts_inline_record(first) => {
+            Some(first) if CommandLineArgument::new(first).starts_inline_record() => {
                 LojixRequest::from_nota(&self.inline_nota_text()?)
             }
             Some(first) => {
@@ -235,6 +238,16 @@ impl RequestFile {
     }
 }
 
-fn starts_inline_record(argument: &OsString) -> bool {
-    argument.to_string_lossy().starts_with('(')
+struct CommandLineArgument<'argument> {
+    argument: &'argument OsString,
+}
+
+impl<'argument> CommandLineArgument<'argument> {
+    fn new(argument: &'argument OsString) -> Self {
+        Self { argument }
+    }
+
+    fn starts_inline_record(&self) -> bool {
+        self.argument.to_string_lossy().starts_with('(')
+    }
 }

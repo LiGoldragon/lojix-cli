@@ -5,10 +5,32 @@ use crate::error::Result;
 
 pub struct HorizonProjector;
 
+pub struct HorizonProjection {
+    proposal: ClusterProposal,
+    viewpoint: Viewpoint,
+}
+
+pub struct HorizonProjectionInput {
+    pub proposal: ClusterProposal,
+    pub viewpoint: Viewpoint,
+}
+
+impl HorizonProjection {
+    pub fn from_input(input: HorizonProjectionInput) -> Self {
+        Self {
+            proposal: input.proposal,
+            viewpoint: input.viewpoint,
+        }
+    }
+
+    pub fn project(&self) -> Result<Horizon> {
+        self.proposal.project(&self.viewpoint).map_err(Into::into)
+    }
+}
+
 pub enum ProjectMsg {
     Project {
-        proposal: ClusterProposal,
-        viewpoint: Viewpoint,
+        projection: HorizonProjection,
         reply: RpcReplyPort<Result<Horizon>>,
     },
 }
@@ -34,13 +56,8 @@ impl Actor for HorizonProjector {
         _state: &mut Self::State,
     ) -> std::result::Result<(), ActorProcessingErr> {
         match msg {
-            ProjectMsg::Project {
-                proposal,
-                viewpoint,
-                reply,
-            } => {
-                let result = proposal.project(&viewpoint).map_err(Into::into);
-                let _ = reply.send(result);
+            ProjectMsg::Project { projection, reply } => {
+                let _ = reply.send(projection.project());
             }
         }
         Ok(())

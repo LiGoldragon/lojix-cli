@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use ractor::Actor;
 
-use lojix_cli::deploy::{DeployCoordinator, DeployMsg, DeployOutcome};
+use lojix_cli::deploy::{DeployCoordinator, DeployMsg};
 use lojix_cli::request::CommandLine;
 
 #[tokio::main]
@@ -36,7 +36,8 @@ async fn main() -> ExitCode {
     let _ = handle.await;
 
     match outcome {
-        Ok(ractor::rpc::CallResult::Success(Ok(DeployOutcome { stdout }))) => {
+        Ok(ractor::rpc::CallResult::Success(Ok(outcome))) => {
+            let stdout = outcome.stdout_text();
             print!("{stdout}");
             if !stdout.ends_with('\n') {
                 println!();
