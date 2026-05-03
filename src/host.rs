@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use horizon_lib::name::CriomeDomainName;
+use horizon_lib::name::{CriomeDomainName, UserName};
 use horizon_lib::node::Node;
 
 use crate::cluster::OverrideUri;
@@ -21,6 +21,18 @@ impl SshTarget {
 
     pub fn from_criome_domain(domain: &CriomeDomainName) -> Self {
         Self(format!("root@{}", domain.as_str()))
+    }
+
+    pub fn from_user_at_domain(user: &UserName, domain: &CriomeDomainName) -> Self {
+        Self(format!("{}@{}", user.as_str(), domain.as_str()))
+    }
+
+    pub fn with_user(&self, user: &UserName) -> Self {
+        let domain = self
+            .0
+            .split_once('@')
+            .map_or(self.0.as_str(), |(_, domain)| domain);
+        Self(format!("{}@{}", user.as_str(), domain))
     }
 
     pub fn ssh_uri(&self) -> String {

@@ -21,15 +21,11 @@ The current implementation supports:
 - `OsOnly`: system generation with Home Manager excluded for that
   CriomOS evaluation.
 - `HomeOnly`: one user's Home Manager activation package, built from
-  the same CriomOS `nixosConfigurations.target` surface.
+  `CriomOS-home` through a generated direct Home Manager wrapper.
 - Inline Nota requests, request files, and a no-argument default config.
-- Remote system builders selected from projected horizon nodes.
-- Local Home Manager profile setting and activation.
+- Remote system and home builders selected from projected horizon nodes.
+- Local or remote Home Manager profile setting and activation.
 - SSH-break-resistant `BootOnce` system activation.
-
-Remote `HomeOnly` activation is intentionally unsupported. It needs a
-separate design for user identity, closure placement, and user service
-dispatch.
 
 ## Quick Start
 
@@ -54,7 +50,7 @@ lojix-cli
 Run from this repo without installing:
 
 ```sh
-nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/main" Profile None)'
+nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS-home/main" Profile None)'
 ```
 
 The `--` in the last command belongs to `nix run`; it is not a
@@ -92,7 +88,7 @@ positional.
 ```nota
 (FullOs cluster node source criomos action builder?)
 (OsOnly cluster node source criomos action builder?)
-(HomeOnly cluster node user source criomos mode builder?)
+(HomeOnly cluster node user source home mode builder?)
 ```
 
 Fields:
@@ -103,7 +99,8 @@ Fields:
 | `node` | Target node name within the projected cluster. |
 | `user` | Target Unix/Home Manager user for `HomeOnly`. |
 | `source` | Path to the cluster proposal Nota file. |
-| `criomos` | CriomOS flake reference to evaluate. Use branch refs such as `github:LiGoldragon/CriomOS/main` for operator-facing requests. |
+| `criomos` | CriomOS flake reference to evaluate for `FullOs` and `OsOnly`. Use branch refs such as `github:LiGoldragon/CriomOS/main` for operator-facing requests. |
+| `home` | CriomOS-home flake reference to evaluate for `HomeOnly`. Use branch refs such as `github:LiGoldragon/CriomOS-home/main`. |
 | `action` | System action for `FullOs` and `OsOnly`. |
 | `mode` | Home action for `HomeOnly`. |
 | `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
@@ -132,11 +129,11 @@ Examples:
 ```nota
 (FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)
 (OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Build prom)
-(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS/main" Profile None)
+(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS-home/main" Profile None)
 ```
 
-`HomeOnly` currently rejects a builder. System requests validate the
-builder against the projected horizon before invoking Nix.
+All deploy kinds validate a requested builder against the projected
+horizon before invoking Nix.
 
 ## Deploy Kinds
 
@@ -171,21 +168,30 @@ nixosConfigurations.target
 
 ### `HomeOnly`
 
-`HomeOnly` builds one user's Home Manager activation package from the
-same CriomOS system surface:
+`HomeOnly` builds one user's Home Manager activation package without
+evaluating the CriomOS flake. `lojix-cli` generates a small wrapper
+flake that consumes:
 
 ```text
-nixosConfigurations.target.config.home-manager.users.<user>.home.activationPackage
+CriomOS-home.homeModules.default
+projected horizon
+projected system
+CriomOS-pkgs
+CriomOS-lib
+```
+
+The build target is the wrapper's package output:
+
+```text
+packages.<system>.activationPackage
 ```
 
 Before Nix runs, `lojix-cli` checks that the requested user exists in
-the projected horizon. For `Profile` and `Activate`, it also checks the
-local execution context:
-
-- `USER` or `LOGNAME` must match the requested user.
-- `hostname -s` must match the requested node.
-
-That prevents accidentally mutating the wrong user's home profile.
+the projected horizon. For `Profile` and `Activate`, it copies the
+realized closure to the target when needed, then runs the profile and
+activation commands as the requested Unix user on the target. If the
+dispatcher is already the requested user on the requested node, the
+commands run locally.
 
 ## How A Deploy Runs
 
@@ -209,10 +215,10 @@ The actor pipeline is:
 DeployCoordinator
   ├── ProposalReader       reads the source Nota proposal
   ├── HorizonProjector     projects with horizon-lib in-process
-  ├── HorizonArtifact      writes override-input flake directories
+  ├── HorizonArtifact      writes override-input and wrapper flake directories
   ├── NixBuilder           runs nix locally or through ssh
-  ├── ClosureCopier        copies system closures to activation targets
-  └── Activator            performs system or local-home activation
+  ├── ClosureCopier        copies closures to activation targets
+  └── Activator            performs system or home activation
 ```
 
 Each actor message carries one domain object plus its reply channel.
@@ -222,13 +228,14 @@ behavior.
 
 ## Override Inputs
 
-`lojix-cli` materializes three small flake inputs under the user's cache:
+`lojix-cli` materializes small flake inputs under the user's cache:
 
 | Input | Contents | Used as |
 |---|---|---|
 | `horizon` | Projected horizon JSON and flake wrapper. | `--override-input horizon ...` |
 | `system` | The target Nix system string. | `--override-input system ...` |
-| `deployment` | `deployment.includeHome = true` or `false`. | `--override-input deployment ...` |
+| `deployment` | `deployment.includeHome = true` or `false`. | System deploys only: `--override-input deployment ...` |
+| `home-wrapper` | Generated direct Home Manager flake. | `HomeOnly` build flake. |
 
 The deployment shape is:
 
@@ -236,11 +243,12 @@ The deployment shape is:
 |---|---:|
 | `FullOs` | `true` |
 | `OsOnly` | `false` |
-| `HomeOnly` | `true` |
+| `HomeOnly` | Not used |
 
-When a remote system builder is used, these override-input directories
-are staged onto the builder first. The Nix command then runs on the
-builder with paths that exist in the builder's filesystem.
+When a remote builder is used, the required override-input directories
+and wrapper flake are staged onto the builder first. The Nix command
+then runs on the builder with paths that exist in the builder's
+filesystem.
 
 ## Builder Semantics
 
@@ -256,11 +264,11 @@ Validation rules:
 - `builder == node` is allowed and means "build on the target".
 - A different builder must be present in projected `ex_nodes`.
 - The builder node must have `is_builder = true`.
-- `HomeOnly` with a builder is rejected.
 
 SSH always uses key-based batch mode. The target address is derived
 from the projected node's Criome domain name as root SSH, not from a
-CLI target flag.
+CLI target flag. Home activation switches to the requested user for the
+profile and activation commands.
 
 ## Activation Details
 
@@ -289,13 +297,17 @@ running generation, and arms the new generation as the one-shot entry.
 
 Home activation applies to `HomeOnly`.
 
-`Profile` sets the Home Manager profile in the user's local state
-directory to the built generation. It does not run the generation's
-activation script.
+`Profile` sets the Home Manager profile in the user's state directory
+to the built generation. It does not run the generation's activation
+script.
 
 `Activate` runs `Profile` first, then executes the generation's
 activation script. This can mutate the live user session, so use it
 when live home activation is intended.
+
+For remote targets, `Profile` and `Activate` first copy the closure to
+the target unless it was built there. The commands then run over SSH as
+the requested user, not as root.
 
 ## Output
 
@@ -308,8 +320,7 @@ On success, stdout is the typed Nix result:
 
 Nix progress and activation logs stream on stderr. Process failures are
 reported through typed crate errors such as Nix failure, SSH failure,
-local hostname failure, invalid builder, unknown home user, or local
-home context mismatch.
+local hostname failure, invalid builder, or unknown home user.
 
 ## Development
 

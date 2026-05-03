@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use horizon_lib::Horizon;
-use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::name::{ClusterName, NodeName, UserName};
 use horizon_lib::species::System;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::build::DeploymentShape;
-use crate::cluster::{NarHashSri, OverrideUri};
+use crate::cluster::{FlakeRef, NarHashSri, OverrideUri};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
@@ -140,6 +140,94 @@ impl DeploymentDir {
     }
 }
 
+pub struct HomeWrapperDir(PathBuf);
+
+pub struct HomeWrapperCacheKey<'key> {
+    pub cluster: &'key ClusterName,
+    pub node: &'key NodeName,
+    pub user: &'key UserName,
+}
+
+pub struct HomeWrapperSpec<'spec> {
+    pub home: &'spec FlakeRef,
+    pub user: &'spec UserName,
+    pub system: System,
+}
+
+impl HomeWrapperDir {
+    pub fn try_create_cache(key: HomeWrapperCacheKey<'_>) -> Result<Self> {
+        let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
+        let dir = PathBuf::from(home)
+            .join(".cache/lojix/home-wrapper")
+            .join(key.cluster.as_str())
+            .join(key.node.as_str())
+            .join(key.user.as_str());
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self(dir))
+    }
+
+    pub fn write(&self, spec: HomeWrapperSpec<'_>) -> Result<()> {
+        let system = NixSystemName::from_system(spec.system);
+        let user = spec.user.as_str();
+        let home = spec.home.nix_string_literal();
+        let flake = format!(
+            "{{\n\
+             \x20 inputs = {{\n\
+             \x20   criomos-home.url = {home};\n\
+             \x20   home-manager.follows = \"criomos-home/home-manager\";\n\
+             \x20   nixpkgs.follows = \"criomos-home/nixpkgs\";\n\
+             \x20   criomos-lib.url = \"github:LiGoldragon/CriomOS-lib/main\";\n\
+             \x20   criomos-home.inputs.criomos-lib.follows = \"criomos-lib\";\n\
+             \x20   system.url = \"path:./system\";\n\
+             \x20   pkgs.url = \"github:LiGoldragon/CriomOS-pkgs/main\";\n\
+             \x20   pkgs.inputs.nixpkgs.follows = \"nixpkgs\";\n\
+             \x20   pkgs.inputs.system.follows = \"system\";\n\
+             \x20   horizon.url = \"path:./horizon\";\n\
+             \x20 }};\n\
+             \n\
+             \x20 outputs = inputs:\n\
+             \x20 let\n\
+             \x20   system = inputs.system.system;\n\
+             \x20   pkgs = inputs.pkgs.pkgs;\n\
+             \x20   horizon = inputs.horizon.horizon;\n\
+             \x20   userName = \"{user}\";\n\
+             \x20   user = horizon.users.${{userName}};\n\
+             \x20   home = inputs.home-manager.lib.homeManagerConfiguration {{\n\
+             \x20     inherit pkgs;\n\
+             \x20     extraSpecialArgs = {{ inherit horizon user; }};\n\
+             \x20     modules = [\n\
+             \x20       inputs.criomos-home.homeModules.default\n\
+             \x20       {{\n\
+             \x20         home.username = userName;\n\
+             \x20         home.homeDirectory = \"/home/${{userName}}\";\n\
+             \x20         home.stateVersion = \"26.05\";\n\
+             \x20       }}\n\
+             \x20     ];\n\
+             \x20   }};\n\
+             \x20 in {{\n\
+             \x20   packages.{system}.activationPackage = home.activationPackage;\n\
+             \x20   homeConfigurations.${{userName}} = home;\n\
+             \x20 }};\n\
+             }}\n",
+            system = system.as_str(),
+        );
+        std::fs::write(self.0.join("flake.nix"), flake)?;
+        Ok(())
+    }
+
+    pub async fn nar_hash(&self) -> Result<NarHashSri> {
+        NarHashInput::from_directory(&self.0).calculate().await
+    }
+
+    pub fn override_uri(&self) -> OverrideUri {
+        OverrideUri::from_local_path(&self.0)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
 struct NarHashInput<'directory> {
     directory: &'directory Path,
 }
@@ -167,13 +255,16 @@ impl<'directory> NarHashInput<'directory> {
 pub struct MaterializedArtifact {
     pub horizon_dir: HorizonDir,
     pub system_dir: SystemDir,
-    pub deployment_dir: DeploymentDir,
+    pub deployment_dir: Option<DeploymentDir>,
+    pub home_wrapper_dir: Option<HomeWrapperDir>,
     pub horizon_nar_hash: NarHashSri,
     pub system_nar_hash: NarHashSri,
-    pub deployment_nar_hash: NarHashSri,
+    pub deployment_nar_hash: Option<NarHashSri>,
+    pub home_wrapper_nar_hash: Option<NarHashSri>,
     pub horizon_uri: OverrideUri,
     pub system_uri: OverrideUri,
-    pub deployment_uri: OverrideUri,
+    pub deployment_uri: Option<OverrideUri>,
+    pub home_wrapper_uri: Option<OverrideUri>,
 }
 
 pub struct HorizonArtifact;
@@ -182,14 +273,22 @@ pub struct ArtifactMaterialization {
     horizon: Horizon,
     cluster: ClusterName,
     node: NodeName,
-    deployment_shape: DeploymentShape,
+    deployment_shape: Option<DeploymentShape>,
+    home: Option<HomeMaterialization>,
 }
 
 pub struct ArtifactMaterializationInput {
     pub horizon: Horizon,
     pub cluster: ClusterName,
     pub node: NodeName,
-    pub deployment_shape: DeploymentShape,
+    pub deployment_shape: Option<DeploymentShape>,
+    pub home: Option<HomeMaterialization>,
+}
+
+#[derive(Clone)]
+pub struct HomeMaterialization {
+    pub user: UserName,
+    pub home: FlakeRef,
 }
 
 impl ArtifactMaterialization {
@@ -199,6 +298,7 @@ impl ArtifactMaterialization {
             cluster: input.cluster,
             node: input.node,
             deployment_shape: input.deployment_shape,
+            home: input.home,
         }
     }
 
@@ -216,21 +316,49 @@ impl ArtifactMaterialization {
         let system_nar_hash = system_dir.nar_hash().await?;
         let system_uri = system_dir.override_uri();
 
-        let deployment_dir = DeploymentDir::try_create_cache(self.deployment_shape)?;
-        deployment_dir.write(self.deployment_shape)?;
-        let deployment_nar_hash = deployment_dir.nar_hash().await?;
-        let deployment_uri = deployment_dir.override_uri();
+        let (deployment_dir, deployment_nar_hash, deployment_uri) = match self.deployment_shape {
+            None => (None, None, None),
+            Some(shape) => {
+                let dir = DeploymentDir::try_create_cache(shape)?;
+                dir.write(shape)?;
+                let nar_hash = dir.nar_hash().await?;
+                let uri = dir.override_uri();
+                (Some(dir), Some(nar_hash), Some(uri))
+            }
+        };
+
+        let (home_wrapper_dir, home_wrapper_nar_hash, home_wrapper_uri) = match self.home.as_ref() {
+            None => (None, None, None),
+            Some(home) => {
+                let dir = HomeWrapperDir::try_create_cache(HomeWrapperCacheKey {
+                    cluster: &self.cluster,
+                    node: &self.node,
+                    user: &home.user,
+                })?;
+                dir.write(HomeWrapperSpec {
+                    home: &home.home,
+                    user: &home.user,
+                    system: self.horizon.node.system,
+                })?;
+                let nar_hash = dir.nar_hash().await?;
+                let uri = dir.override_uri();
+                (Some(dir), Some(nar_hash), Some(uri))
+            }
+        };
 
         Ok(MaterializedArtifact {
             horizon_dir,
             system_dir,
             deployment_dir,
+            home_wrapper_dir,
             horizon_nar_hash,
             system_nar_hash,
             deployment_nar_hash,
+            home_wrapper_nar_hash,
             horizon_uri,
             system_uri,
             deployment_uri,
+            home_wrapper_uri,
         })
     }
 }

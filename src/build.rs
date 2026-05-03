@@ -1,6 +1,7 @@
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use horizon_lib::name::UserName;
+use horizon_lib::species::System;
 
 use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, StorePath};
 use crate::error::Result;
@@ -170,7 +171,7 @@ impl BuildPlan {
     }
 
     pub fn supports_remote_builder(&self) -> bool {
-        matches!(self, Self::System { .. })
+        true
     }
 
     fn nix_operation(&self) -> NixOperation {
@@ -183,18 +184,33 @@ impl BuildPlan {
         }
     }
 
-    fn target_attr(&self, flake: &FlakeRef) -> String {
+    fn target_attr(&self, flake: &FlakeRef, system: System) -> String {
         match self {
             Self::System { .. } => format!(
                 "{}#nixosConfigurations.target.config.system.build.toplevel",
                 flake.as_str(),
             ),
-            Self::Home { user, .. } => format!(
-                "{}#nixosConfigurations.target.config.home-manager.users.{}.home.activationPackage",
+            Self::Home { .. } => format!(
+                "{}#packages.{}.activationPackage",
                 flake.as_str(),
-                user.as_str(),
+                NixSystemName::from_system(system).as_str(),
             ),
         }
+    }
+}
+
+struct NixSystemName(&'static str);
+
+impl NixSystemName {
+    fn from_system(system: System) -> Self {
+        match system {
+            System::X86_64Linux => Self("x86_64-linux"),
+            System::Aarch64Linux => Self("aarch64-linux"),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        self.0
     }
 }
 
@@ -226,9 +242,10 @@ pub enum BuildPhaseOutcome {
 
 pub struct NixBuild {
     pub flake: FlakeRef,
+    pub system: System,
     pub horizon_uri: OverrideUri,
     pub system_uri: OverrideUri,
-    pub deployment_uri: OverrideUri,
+    pub deployment_uri: Option<OverrideUri>,
     pub plan: BuildPlan,
     pub builder: Option<SshTarget>,
 }
@@ -239,7 +256,7 @@ impl NixBuild {
     /// `builder` is set. Exposed so tests can assert wire shape
     /// without spawning nix.
     pub fn nix_invocation(&self) -> ProcessInvocation {
-        let target_attr = self.plan.target_attr(&self.flake);
+        let target_attr = self.plan.target_attr(&self.flake, self.system);
         let arguments = match self.plan.nix_operation() {
             NixOperation::EvalDrvPath => vec![
                 "eval".to_string(),
@@ -255,7 +272,7 @@ impl NixBuild {
                 target_attr,
             ],
         };
-        ProcessInvocation::new("nix")
+        let mut invocation = ProcessInvocation::new("nix")
             .with_arguments(arguments)
             .with_arguments([
                 "--override-input".to_string(),
@@ -264,10 +281,15 @@ impl NixBuild {
                 "--override-input".to_string(),
                 "system".to_string(),
                 self.system_uri.as_str().to_string(),
+            ]);
+        if let Some(deployment_uri) = &self.deployment_uri {
+            invocation = invocation.with_arguments([
                 "--override-input".to_string(),
                 "deployment".to_string(),
-                self.deployment_uri.as_str().to_string(),
-            ])
+                deployment_uri.as_str().to_string(),
+            ]);
+        }
+        invocation
     }
 
     pub async fn run(&self) -> Result<BuildPhaseOutcome> {

@@ -49,6 +49,10 @@ impl FlakeRef {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn nix_string_literal(&self) -> String {
+        format!("\"{}\"", self.0.replace('\\', "\\\\").replace('"', "\\\""))
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -8,8 +8,8 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, SystemActivation};
 use crate::artifact::{
-    ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HorizonArtifact,
-    MaterializedArtifact,
+    ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HomeMaterialization,
+    HorizonArtifact, MaterializedArtifact,
 };
 use crate::build::{BuildMsg, BuildPhaseOutcome, BuildPlan, HomeMode, NixBuild, NixBuilder};
 use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, ProposalSource, StorePath};
@@ -31,7 +31,7 @@ pub struct DeployRequest {
     pub builder: Option<NodeName>,
     pub plan: BuildPlan,
     pub source: ProposalSource,
-    pub criomos: FlakeRef,
+    pub flake: FlakeRef,
 }
 
 impl DeployRequest {
@@ -124,9 +124,6 @@ impl DeployState {
         let builder_target = match &request.builder {
             None => None,
             Some(name) => {
-                if !request.plan.supports_remote_builder() {
-                    return Err(Error::UnsupportedHomeBuilder(name.clone()));
-                }
                 // The builder resolves against the full horizon —
                 // including the viewpoint node, so builder
                 // prometheus with node prometheus is the legitimate
@@ -153,6 +150,7 @@ impl DeployState {
             }
         };
 
+        let target_system = horizon.node.system;
         let materialized = ActorCallResult::from_result(
             self.artifact
                 .call(
@@ -162,7 +160,19 @@ impl DeployState {
                                 horizon,
                                 cluster: request.cluster.clone(),
                                 node: request.node.clone(),
-                                deployment_shape: request.plan.deployment_shape(),
+                                deployment_shape: match request.plan {
+                                    BuildPlan::System { .. } => {
+                                        Some(request.plan.deployment_shape())
+                                    }
+                                    BuildPlan::Home { .. } => None,
+                                },
+                                home: match &request.plan {
+                                    BuildPlan::System { .. } => None,
+                                    BuildPlan::Home { user, .. } => Some(HomeMaterialization {
+                                        user: user.clone(),
+                                        home: request.flake.clone(),
+                                    }),
+                                },
                             },
                         ),
                         reply,
@@ -184,12 +194,25 @@ impl DeployState {
             })
             .await?;
 
+        let build_flake = match &request.plan {
+            BuildPlan::System { .. } => request.flake.clone(),
+            BuildPlan::Home { .. } => FlakeRef::new(
+                staged_inputs
+                    .home_wrapper_uri
+                    .as_ref()
+                    .expect("home wrapper materialized for home plan")
+                    .as_str()
+                    .to_string(),
+            ),
+        };
+
         let outcome = ActorCallResult::from_result(
             self.builder
                 .call(
                     |reply| BuildMsg::Run {
                         build: NixBuild {
-                            flake: request.criomos.clone(),
+                            flake: build_flake,
+                            system: target_system,
                             horizon_uri: staged_inputs.horizon_uri.clone(),
                             system_uri: staged_inputs.system_uri.clone(),
                             deployment_uri: staged_inputs.deployment_uri.clone(),
@@ -236,6 +259,7 @@ impl DeployState {
                 horizon_uri: request.materialized.horizon_uri.clone(),
                 system_uri: request.materialized.system_uri.clone(),
                 deployment_uri: request.materialized.deployment_uri.clone(),
+                home_wrapper_uri: request.materialized.home_wrapper_uri.clone(),
                 staging: None,
             }),
             Some(target) => {
@@ -252,16 +276,33 @@ impl DeployState {
                         name: "system",
                     })
                     .await?;
-                let deployment_uri = staging
-                    .rsync(RemoteRsync {
-                        local_dir: request.materialized.deployment_dir.path(),
-                        name: "deployment",
-                    })
-                    .await?;
+                let deployment_uri = match &request.materialized.deployment_dir {
+                    None => None,
+                    Some(deployment_dir) => Some(
+                        staging
+                            .rsync(RemoteRsync {
+                                local_dir: deployment_dir.path(),
+                                name: "deployment",
+                            })
+                            .await?,
+                    ),
+                };
+                let home_wrapper_uri = match &request.materialized.home_wrapper_dir {
+                    None => None,
+                    Some(home_wrapper_dir) => Some(
+                        staging
+                            .rsync(RemoteRsync {
+                                local_dir: home_wrapper_dir.path(),
+                                name: "home-wrapper",
+                            })
+                            .await?,
+                    ),
+                };
                 Ok(StagedInputs {
                     horizon_uri,
                     system_uri,
                     deployment_uri,
+                    home_wrapper_uri,
                     staging: Some(staging),
                 })
             }
@@ -319,11 +360,28 @@ impl DeployState {
                     } => {}
                     BuildPlan::Home { user, mode } => {
                         ActorCallResult::from_result(
+                            self.copier
+                                .call(
+                                    |reply| CopyMsg::Run {
+                                        copy: ClosureCopy {
+                                            store_path: store_path.clone(),
+                                            source: location,
+                                            target: request.target.clone(),
+                                        },
+                                        reply,
+                                    },
+                                    None,
+                                )
+                                .await,
+                        )
+                        .into_payload()??;
+                        ActorCallResult::from_result(
                             self.activator
                                 .call(
                                     |reply| ActivateMsg::Run {
                                         activation: Activation::Home(HomeActivation {
                                             node: request.node,
+                                            target: request.target,
                                             user,
                                             store_path: store_path.clone(),
                                             mode,
@@ -351,7 +409,8 @@ struct StageInputsRequest<'request> {
 struct StagedInputs {
     horizon_uri: OverrideUri,
     system_uri: OverrideUri,
-    deployment_uri: OverrideUri,
+    deployment_uri: Option<OverrideUri>,
+    home_wrapper_uri: Option<OverrideUri>,
     staging: Option<RemoteStaging>,
 }
 

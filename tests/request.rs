@@ -28,6 +28,10 @@ fn criomos_ref() -> FlakeRef {
     FlakeRef::new("github:LiGoldragon/CriomOS/abc123")
 }
 
+fn home_ref() -> FlakeRef {
+    FlakeRef::new("github:LiGoldragon/CriomOS-home/main")
+}
+
 #[test]
 fn inline_nota_deploy_request_decodes_after_shell_token_join() {
     let command_line = CommandLine::from_arguments([
@@ -82,7 +86,7 @@ fn file_path_nota_os_only_request_decodes() {
 #[test]
 fn home_only_request_decodes_user_and_mode() {
     let request = LojixRequest::from_nota(
-        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Profile)",
+        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS-home/main\" Profile)",
     )
     .unwrap();
 
@@ -93,7 +97,7 @@ fn home_only_request_decodes_user_and_mode() {
             node: node_name("tiger"),
             user: user_name("li"),
             source: proposal_source(),
-            criomos: criomos_ref(),
+            home: home_ref(),
             mode: HomeMode::Profile,
             builder: None,
         }),
@@ -164,7 +168,7 @@ fn home_record_maps_to_home_plan() {
         node: node_name("tiger"),
         user: user_name("li"),
         source: proposal_source(),
-        criomos: criomos_ref(),
+        home: home_ref(),
         mode: HomeMode::Activate,
         builder: None,
     })

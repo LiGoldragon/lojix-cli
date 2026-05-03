@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName, UserName};
+use horizon_lib::species::System;
 
 use lojix_cli::activate::{BootEntry, HomeActivation, SystemActivation, SystemProfileLink};
 use lojix_cli::build::{BuildLocation, BuildPlan, HomeBuildPlan, HomeMode, NixBuild, SystemAction};
@@ -23,9 +24,15 @@ fn target_for(node: &str, cluster: &str) -> SshTarget {
 fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<String> {
     let build = NixBuild {
         flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
+        system: System::X86_64Linux,
         horizon_uri: OverrideUri::from_local_path(Path::new("/cache/horizon")),
         system_uri: OverrideUri::from_local_path(Path::new("/cache/system")),
-        deployment_uri: OverrideUri::from_local_path(Path::new("/cache/deployment/home-on")),
+        deployment_uri: match plan {
+            BuildPlan::System { .. } => Some(OverrideUri::from_local_path(Path::new(
+                "/cache/deployment/home-on",
+            ))),
+            BuildPlan::Home { .. } => None,
+        },
         plan,
         builder,
     };
@@ -86,9 +93,14 @@ fn nix_home_build_arguments_use_home_activation_package_attr() {
         None,
     );
     assert_eq!(arguments[0], "build");
-    assert!(arguments.iter().any(|argument| argument.contains(
-        "github:LiGoldragon/CriomOS/abc123#nixosConfigurations.target.config.home-manager.users.li.home.activationPackage"
-    )));
+    assert!(
+        arguments.iter().any(|argument| argument
+            .contains("github:LiGoldragon/CriomOS/abc123#packages.x86_64-linux.activationPackage"))
+    );
+    assert!(
+        !arguments.iter().any(|argument| argument == "deployment"),
+        "home wrapper must not receive CriomOS deployment override"
+    );
 }
 
 #[test]
@@ -347,6 +359,7 @@ fn activation_switch_includes_profile_set() {
 fn home_profile_activation_sets_home_manager_profile() {
     let activation = HomeActivation {
         node: NodeName::try_new("ouranos").unwrap(),
+        target: target_for("ouranos", "goldragon"),
         user: UserName::try_new("li").unwrap(),
         store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
         mode: HomeMode::Profile,
@@ -367,6 +380,7 @@ fn home_profile_activation_sets_home_manager_profile() {
 fn home_activate_runs_activation_script_from_generation() {
     let activation = HomeActivation {
         node: NodeName::try_new("ouranos").unwrap(),
+        target: target_for("ouranos", "goldragon"),
         user: UserName::try_new("li").unwrap(),
         store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
         mode: HomeMode::Activate,
@@ -377,6 +391,42 @@ fn home_activate_runs_activation_script_from_generation() {
         "/nix/store/abc-home-manager-generation/activate"
     );
     assert!(invocation.arguments().is_empty());
+}
+
+#[test]
+fn remote_home_profile_runs_as_requested_user_on_target() {
+    let activation = HomeActivation {
+        node: NodeName::try_new("ouranos").unwrap(),
+        target: target_for("ouranos", "goldragon"),
+        user: UserName::try_new("li").unwrap(),
+        store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
+        mode: HomeMode::Profile,
+    };
+    let invocation = activation.remote_profile_invocation();
+    assert_eq!(invocation.program(), "ssh");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[2], "li@ouranos.goldragon.criome");
+    assert!(arguments[3].contains("nix-env -p \"$HOME/.local/state/nix/profiles/home-manager\""));
+    assert!(arguments[3].contains("--set /nix/store/abc-home-manager-generation"));
+}
+
+#[test]
+fn remote_home_activate_runs_generation_activate_as_requested_user() {
+    let activation = HomeActivation {
+        node: NodeName::try_new("ouranos").unwrap(),
+        target: target_for("ouranos", "goldragon"),
+        user: UserName::try_new("li").unwrap(),
+        store_path: StorePath::try_new("/nix/store/abc-home-manager-generation").unwrap(),
+        mode: HomeMode::Activate,
+    };
+    let invocation = activation.remote_activate_invocation();
+    assert_eq!(invocation.program(), "ssh");
+    let arguments = invocation.arguments();
+    assert_eq!(arguments[2], "li@ouranos.goldragon.criome");
+    assert_eq!(
+        arguments[3],
+        "/nix/store/abc-home-manager-generation/activate"
+    );
 }
 
 #[test]

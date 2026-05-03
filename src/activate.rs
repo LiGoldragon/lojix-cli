@@ -263,6 +263,7 @@ impl SystemActivation {
 
 pub struct HomeActivation {
     pub node: NodeName,
+    pub target: SshTarget,
     pub user: UserName,
     pub store_path: StorePath,
     pub mode: HomeMode,
@@ -284,6 +285,19 @@ impl HomeActivation {
         ProcessInvocation::new(format!("{}/activate", self.store_path.as_str()))
     }
 
+    pub fn remote_profile_invocation(&self) -> ProcessInvocation {
+        self.user_target()
+            .remote_invocation(ShellCommand::from_raw(format!(
+                "nix-env -p \"$HOME/.local/state/nix/profiles/home-manager\" --set {}",
+                ShellArgument::new(self.store_path.as_str()).to_command_text(),
+            )))
+    }
+
+    pub fn remote_activate_invocation(&self) -> ProcessInvocation {
+        self.user_target()
+            .remote_invocation(ShellCommand::from_invocation(&self.activate_invocation()))
+    }
+
     pub async fn run(&self) -> Result<()> {
         match self.mode {
             HomeMode::Build => Ok(()),
@@ -296,7 +310,12 @@ impl HomeActivation {
     }
 
     async fn run_profile(&self) -> Result<()> {
-        self.require_local_context().await?;
+        if !self.is_local_context().await? {
+            return self
+                .remote_profile_invocation()
+                .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+                .await;
+        }
         let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
         self.profile_invocation(Path::new(&home))
             .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Nix))
@@ -304,30 +323,24 @@ impl HomeActivation {
     }
 
     async fn run_activate(&self) -> Result<()> {
-        self.require_local_context().await?;
+        if !self.is_local_context().await? {
+            return self
+                .remote_activate_invocation()
+                .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
+                .await;
+        }
         self.activate_invocation()
             .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Nix))
             .await
     }
 
-    async fn require_local_context(&self) -> Result<()> {
-        let current_user = self.current_user()?;
-        if current_user != self.user.as_str() {
-            return Err(Error::LocalHomeUserMismatch {
-                requested: self.user.clone(),
-                actual: current_user,
-            });
-        }
+    async fn is_local_context(&self) -> Result<bool> {
+        Ok(self.current_user()? == self.user.as_str()
+            && self.current_node().await? == self.node.as_str())
+    }
 
-        let current_node = self.current_node().await?;
-        if current_node != self.node.as_str() {
-            return Err(Error::LocalHomeNodeMismatch {
-                requested: self.node.clone(),
-                actual: current_node,
-            });
-        }
-
-        Ok(())
+    fn user_target(&self) -> SshTarget {
+        self.target.with_user(&self.user)
     }
 
     fn current_user(&self) -> Result<String> {

@@ -35,7 +35,7 @@ pub struct HomeOnly {
     pub node: NodeName,
     pub user: UserName,
     pub source: ProposalSource,
-    pub criomos: FlakeRef,
+    pub home: FlakeRef,
     pub mode: HomeMode,
     pub builder: Option<NodeName>,
 }
@@ -78,7 +78,7 @@ impl FullOs {
             builder: self.builder,
             plan: BuildPlan::full_os(self.action),
             source: self.source,
-            criomos: self.criomos,
+            flake: self.criomos,
         }
     }
 }
@@ -91,7 +91,7 @@ impl OsOnly {
             builder: self.builder,
             plan: BuildPlan::os_only(self.action),
             source: self.source,
-            criomos: self.criomos,
+            flake: self.criomos,
         }
     }
 }
@@ -107,7 +107,7 @@ impl HomeOnly {
                 mode: self.mode,
             }),
             source: self.source,
-            criomos: self.criomos,
+            flake: self.home,
         }
     }
 }
