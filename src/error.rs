@@ -25,9 +25,6 @@ pub enum Error {
     #[error("ssh failed (exit {status}): {stderr}")]
     SshFailed { status: i32, stderr: String },
 
-    #[error("tar failed (exit {status}): {stderr}")]
-    TarFailed { status: i32, stderr: String },
-
     #[error("local hostname command failed (exit {status}): {stderr}")]
     LocalHostnameFailed { status: i32, stderr: String },
 

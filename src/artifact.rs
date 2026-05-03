@@ -1,15 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use horizon_lib::Horizon;
-use horizon_lib::name::{ClusterName, NodeName, UserName};
+use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::species::System;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::build::DeploymentShape;
-use crate::cluster::{FlakeInputRef, FlakeRef, NarHashSri};
+use crate::cluster::{FlakeInputRef, NarHashSri};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
-use crate::publish::{ArchivePublisher, GeneratedInputArchive, GeneratedInputKind};
 
 const HORIZON_FLAKE_TEMPLATE: &str = "{\n\
 \x20 outputs = _: {\n\
@@ -129,102 +128,6 @@ impl DeploymentDir {
     }
 }
 
-pub struct HomeWrapperDir(PathBuf);
-
-pub struct HomeWrapperCacheKey<'key> {
-    pub cluster: &'key ClusterName,
-    pub node: &'key NodeName,
-    pub user: &'key UserName,
-}
-
-pub struct HomeWrapperSpec<'spec> {
-    pub home: &'spec FlakeRef,
-    pub horizon_ref: &'spec FlakeInputRef,
-    pub system_ref: &'spec FlakeInputRef,
-    pub user: &'spec UserName,
-    pub system: System,
-}
-
-impl HomeWrapperDir {
-    pub fn try_create_cache(key: HomeWrapperCacheKey<'_>) -> Result<Self> {
-        let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
-        let dir = PathBuf::from(home)
-            .join(".cache/lojix/home-wrapper")
-            .join(key.cluster.as_str())
-            .join(key.node.as_str())
-            .join(key.user.as_str());
-        std::fs::create_dir_all(&dir)?;
-        Ok(Self(dir))
-    }
-
-    pub fn write(&self, spec: HomeWrapperSpec<'_>) -> Result<()> {
-        let lock = self.0.join("flake.lock");
-        match std::fs::remove_file(lock) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-
-        let system = NixSystemName::from_system(spec.system);
-        let user = spec.user.as_str();
-        let home = spec.home.nix_string_literal();
-        let horizon = spec.horizon_ref.nix_string_literal();
-        let target_system = spec.system_ref.nix_string_literal();
-        let flake = format!(
-            "{{\n\
-             \x20 inputs = {{\n\
-             \x20   criomos-home.url = {home};\n\
-             \x20   home-manager.follows = \"criomos-home/home-manager\";\n\
-             \x20   nixpkgs.follows = \"pkgs/nixpkgs\";\n\
-             \x20   criomos-home.inputs.nixpkgs.follows = \"nixpkgs\";\n\
-             \x20   criomos-lib.url = \"github:LiGoldragon/CriomOS-lib/main\";\n\
-             \x20   criomos-home.inputs.criomos-lib.follows = \"criomos-lib\";\n\
-             \x20   system.url = {target_system};\n\
-             \x20   pkgs.url = \"github:LiGoldragon/CriomOS-pkgs/main\";\n\
-             \x20   pkgs.inputs.system.follows = \"system\";\n\
-             \x20   horizon.url = {horizon};\n\
-             \x20 }};\n\
-             \n\
-             \x20 outputs = inputs:\n\
-             \x20 let\n\
-             \x20   system = inputs.system.system;\n\
-             \x20   pkgs = inputs.pkgs.pkgs;\n\
-             \x20   horizon = inputs.horizon.horizon;\n\
-             \x20   userName = \"{user}\";\n\
-             \x20   user = horizon.users.${{userName}};\n\
-             \x20   home = inputs.home-manager.lib.homeManagerConfiguration {{\n\
-             \x20     inherit pkgs;\n\
-             \x20     extraSpecialArgs = {{ inherit horizon user; }};\n\
-             \x20     modules = [\n\
-             \x20       inputs.criomos-home.homeModules.default\n\
-             \x20       ({{ lib, ... }}: {{\n\
-             \x20         nixpkgs.overlays = lib.mkForce pkgs.overlays;\n\
-             \x20         home.username = userName;\n\
-             \x20         home.homeDirectory = \"/home/${{userName}}\";\n\
-             \x20         home.stateVersion = \"26.05\";\n\
-             \x20       }})\n\
-             \x20     ];\n\
-             \x20   }};\n\
-             \x20 in {{\n\
-             \x20   packages.{system}.activationPackage = home.activationPackage;\n\
-             \x20   homeConfigurations.${{userName}} = home;\n\
-             \x20 }};\n\
-             }}\n",
-            system = system.as_str(),
-        );
-        std::fs::write(self.0.join("flake.nix"), flake)?;
-        Ok(())
-    }
-
-    pub async fn nar_hash(&self) -> Result<NarHashSri> {
-        NarHashInput::from_directory(&self.0).calculate().await
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
 struct NarHashInput<'directory> {
     directory: &'directory Path,
 }
@@ -253,15 +156,12 @@ pub struct MaterializedArtifact {
     pub horizon_dir: HorizonDir,
     pub system_dir: SystemDir,
     pub deployment_dir: Option<DeploymentDir>,
-    pub home_wrapper_dir: Option<HomeWrapperDir>,
     pub horizon_nar_hash: NarHashSri,
     pub system_nar_hash: NarHashSri,
     pub deployment_nar_hash: Option<NarHashSri>,
-    pub home_wrapper_nar_hash: Option<NarHashSri>,
     pub horizon_ref: FlakeInputRef,
     pub system_ref: FlakeInputRef,
     pub deployment_ref: Option<FlakeInputRef>,
-    pub home_wrapper_ref: Option<FlakeInputRef>,
 }
 
 pub struct HorizonArtifact;
@@ -271,7 +171,6 @@ pub struct ArtifactMaterialization {
     cluster: ClusterName,
     node: NodeName,
     deployment_shape: Option<DeploymentShape>,
-    home: Option<HomeMaterialization>,
 }
 
 pub struct ArtifactMaterializationInput {
@@ -279,13 +178,6 @@ pub struct ArtifactMaterializationInput {
     pub cluster: ClusterName,
     pub node: NodeName,
     pub deployment_shape: Option<DeploymentShape>,
-    pub home: Option<HomeMaterialization>,
-}
-
-#[derive(Clone)]
-pub struct HomeMaterialization {
-    pub user: UserName,
-    pub home: FlakeRef,
 }
 
 impl ArtifactMaterialization {
@@ -295,37 +187,23 @@ impl ArtifactMaterialization {
             cluster: input.cluster,
             node: input.node,
             deployment_shape: input.deployment_shape,
-            home: input.home,
         }
     }
 
     pub async fn materialize(&self) -> Result<MaterializedArtifact> {
-        let publisher = ArchivePublisher::from_environment()?;
-
         let horizon_dir = HorizonDir::try_create_cache(HorizonCacheKey {
             cluster: &self.cluster,
             node: &self.node,
         })?;
         horizon_dir.write(&self.horizon)?;
         let horizon_nar_hash = horizon_dir.nar_hash().await?;
-        let horizon_ref = publisher
-            .publish(GeneratedInputArchive {
-                kind: GeneratedInputKind::Horizon,
-                directory: horizon_dir.path(),
-                nar_hash: &horizon_nar_hash,
-            })
-            .await?;
+        let horizon_ref =
+            FlakeInputRef::from_local_path(horizon_dir.path(), horizon_nar_hash.clone());
 
         let system_dir = SystemDir::try_create_cache(self.horizon.node.system)?;
         system_dir.write(self.horizon.node.system)?;
         let system_nar_hash = system_dir.nar_hash().await?;
-        let system_ref = publisher
-            .publish(GeneratedInputArchive {
-                kind: GeneratedInputKind::System,
-                directory: system_dir.path(),
-                nar_hash: &system_nar_hash,
-            })
-            .await?;
+        let system_ref = FlakeInputRef::from_local_path(system_dir.path(), system_nar_hash.clone());
 
         let (deployment_dir, deployment_nar_hash, deployment_ref) = match self.deployment_shape {
             None => (None, None, None),
@@ -333,40 +211,7 @@ impl ArtifactMaterialization {
                 let dir = DeploymentDir::try_create_cache(shape)?;
                 dir.write(shape)?;
                 let nar_hash = dir.nar_hash().await?;
-                let input_ref = publisher
-                    .publish(GeneratedInputArchive {
-                        kind: GeneratedInputKind::Deployment,
-                        directory: dir.path(),
-                        nar_hash: &nar_hash,
-                    })
-                    .await?;
-                (Some(dir), Some(nar_hash), Some(input_ref))
-            }
-        };
-
-        let (home_wrapper_dir, home_wrapper_nar_hash, home_wrapper_ref) = match self.home.as_ref() {
-            None => (None, None, None),
-            Some(home) => {
-                let dir = HomeWrapperDir::try_create_cache(HomeWrapperCacheKey {
-                    cluster: &self.cluster,
-                    node: &self.node,
-                    user: &home.user,
-                })?;
-                dir.write(HomeWrapperSpec {
-                    home: &home.home,
-                    horizon_ref: &horizon_ref,
-                    system_ref: &system_ref,
-                    user: &home.user,
-                    system: self.horizon.node.system,
-                })?;
-                let nar_hash = dir.nar_hash().await?;
-                let input_ref = publisher
-                    .publish(GeneratedInputArchive {
-                        kind: GeneratedInputKind::HomeWrapper,
-                        directory: dir.path(),
-                        nar_hash: &nar_hash,
-                    })
-                    .await?;
+                let input_ref = FlakeInputRef::from_local_path(dir.path(), nar_hash.clone());
                 (Some(dir), Some(nar_hash), Some(input_ref))
             }
         };
@@ -375,15 +220,12 @@ impl ArtifactMaterialization {
             horizon_dir,
             system_dir,
             deployment_dir,
-            home_wrapper_dir,
             horizon_nar_hash,
             system_nar_hash,
             deployment_nar_hash,
-            home_wrapper_nar_hash,
             horizon_ref,
             system_ref,
             deployment_ref,
-            home_wrapper_ref,
         })
     }
 }

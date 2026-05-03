@@ -62,9 +62,9 @@ pub struct FlakeInputRef {
 }
 
 impl FlakeInputRef {
-    pub fn from_archive_url(url: impl Into<String>, nar_hash: NarHashSri) -> Self {
+    pub fn from_local_path(path: &Path, nar_hash: NarHashSri) -> Self {
         Self {
-            url: url.into(),
+            url: format!("path:{}", path.display()),
             nar_hash,
         }
     }

@@ -216,7 +216,6 @@ DeployCoordinator
   ├── ProposalReader       reads the source Nota proposal
   ├── HorizonProjector     projects with horizon-lib in-process
   ├── HorizonArtifact      writes generated flake inputs
-  ├── ArchivePublisher     publishes generated inputs as archive flakes
   ├── NixBuilder           runs nix locally or through ssh
   ├── ClosureCopier        copies closures to activation targets
   └── Activator            performs system or home activation
@@ -229,25 +228,15 @@ behavior.
 
 ## Generated Inputs
 
-`lojix-cli` materializes small flake inputs, computes their NAR hashes,
-publishes them as archive flakes, and passes those archive refs to Nix.
-Generated input names use short content codes for readability; the full
-NAR hash remains in the flake ref for Nix purity.
+`lojix-cli` materializes small flake inputs under the user's cache,
+computes their NAR hashes, and passes local `path:` flake refs with a
+`narHash` suffix to Nix.
 
 | Input | Contents | Used as |
 |---|---|---|
 | `horizon` | Projected horizon JSON and flake wrapper. | `--override-input horizon ...` |
 | `system` | The target Nix system string. | `--override-input system ...` |
 | `deployment` | `deployment.includeHome = true` or `false`. | System deploys only: `--override-input deployment ...` |
-| `home-wrapper` | Generated direct Home Manager flake. | `HomeOnly` build flake. |
-
-Archive publication defaults:
-
-| Environment | Default |
-|---|---|
-| `LOJIX_ARCHIVE_SSH_TARGET` | `root@prometheus.goldragon.criome` |
-| `LOJIX_ARCHIVE_REMOTE_DIR` | `/var/lib/lojix-inputs` |
-| `LOJIX_ARCHIVE_BASE_URL` | `http://prometheus.goldragon.criome/lojix-inputs` |
 
 The deployment shape is:
 
@@ -257,9 +246,8 @@ The deployment shape is:
 | `OsOnly` | `false` |
 | `HomeOnly` | Not used |
 
-When a remote builder is used, no generated input directories are staged
-onto that builder. The builder receives the same archive flake refs as a
-local build and fetches them through Nix.
+`HomeOnly` evaluates `CriomOS-home` directly. That flake receives the
+same generated `horizon` and `system` inputs as CriomOS.
 
 ## Builder Semantics
 

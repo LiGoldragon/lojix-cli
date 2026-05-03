@@ -222,7 +222,6 @@ pub enum ProcessFailure {
     Nix,
     Rsync,
     Ssh,
-    Tar,
     LocalHostname,
 }
 
@@ -238,10 +237,6 @@ impl ProcessFailure {
                 stderr: exit.stderr,
             },
             Self::Ssh => Error::SshFailed {
-                status: exit.status,
-                stderr: exit.stderr,
-            },
-            Self::Tar => Error::TarFailed {
                 status: exit.status,
                 stderr: exit.stderr,
             },

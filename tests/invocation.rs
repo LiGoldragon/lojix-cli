@@ -25,12 +25,10 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
     let build = NixBuild {
         flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
         system: System::X86_64Linux,
-        horizon_ref: fixture_input_ref("https://lojix.example/horizon/abcdef123456.tar.gz"),
-        system_ref: fixture_input_ref("https://lojix.example/system/abcdef123456.tar.gz"),
+        horizon_ref: fixture_input_ref("/cache/horizon"),
+        system_ref: fixture_input_ref("/cache/system"),
         deployment_ref: match plan {
-            BuildPlan::System { .. } => Some(fixture_input_ref(
-                "https://lojix.example/deployment/abcdef123456.tar.gz",
-            )),
+            BuildPlan::System { .. } => Some(fixture_input_ref("/cache/deployment/home-on")),
             BuildPlan::Home { .. } => None,
         },
         plan,
@@ -41,9 +39,9 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
     invocation.arguments().to_vec()
 }
 
-fn fixture_input_ref(url: &str) -> FlakeInputRef {
-    FlakeInputRef::from_archive_url(
-        url,
+fn fixture_input_ref(path: &str) -> FlakeInputRef {
+    FlakeInputRef::from_local_path(
+        Path::new(path),
         NarHashSri::try_new("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap(),
     )
 }
@@ -62,7 +60,7 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
         .expect("horizon flag");
     assert_eq!(
         arguments[horizon_index + 1],
-        "https://lojix.example/horizon/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+        "path:/cache/horizon?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
     );
     let system_index = arguments
         .iter()
@@ -70,7 +68,7 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
         .expect("system flag");
     assert_eq!(
         arguments[system_index + 1],
-        "https://lojix.example/system/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+        "path:/cache/system?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
     );
     let deployment_index = arguments
         .iter()
@@ -78,7 +76,7 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
         .expect("deployment flag");
     assert_eq!(
         arguments[deployment_index + 1],
-        "https://lojix.example/deployment/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+        "path:/cache/deployment/home-on?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
     );
 }
 
@@ -108,7 +106,7 @@ fn nix_home_build_arguments_use_home_activation_package_attr() {
     assert_eq!(arguments[0], "build");
     assert!(
         arguments.iter().any(|argument| argument
-            .contains("github:LiGoldragon/CriomOS/abc123#packages.x86_64-linux.activationPackage"))
+            .contains("github:LiGoldragon/CriomOS/abc123#homeConfigurations.li.activationPackage"))
     );
     assert!(
         !arguments.iter().any(|argument| argument == "deployment"),

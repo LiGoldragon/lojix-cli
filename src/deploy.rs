@@ -8,8 +8,7 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, SystemActivation};
 use crate::artifact::{
-    ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HomeMaterialization,
-    HorizonArtifact,
+    ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HorizonArtifact,
 };
 use crate::build::{BuildMsg, BuildPhaseOutcome, BuildPlan, HomeMode, NixBuild, NixBuilder};
 use crate::cluster::{DerivationPath, FlakeRef, ProposalSource, StorePath};
@@ -166,13 +165,6 @@ impl DeployState {
                                     }
                                     BuildPlan::Home { .. } => None,
                                 },
-                                home: match &request.plan {
-                                    BuildPlan::System { .. } => None,
-                                    BuildPlan::Home { user, .. } => Some(HomeMaterialization {
-                                        user: user.clone(),
-                                        home: request.flake.clone(),
-                                    }),
-                                },
                             },
                         ),
                         reply,
@@ -185,13 +177,7 @@ impl DeployState {
 
         let build_flake = match &request.plan {
             BuildPlan::System { .. } => request.flake.clone(),
-            BuildPlan::Home { .. } => FlakeRef::new(
-                materialized
-                    .home_wrapper_ref
-                    .as_ref()
-                    .expect("home wrapper materialized for home plan")
-                    .flake_ref(),
-            ),
+            BuildPlan::Home { .. } => request.flake.clone(),
         };
 
         let outcome = ActorCallResult::from_result(

@@ -184,33 +184,18 @@ impl BuildPlan {
         }
     }
 
-    fn target_attr(&self, flake: &FlakeRef, system: System) -> String {
+    fn target_attr(&self, flake: &FlakeRef) -> String {
         match self {
             Self::System { .. } => format!(
                 "{}#nixosConfigurations.target.config.system.build.toplevel",
                 flake.as_str(),
             ),
             Self::Home { .. } => format!(
-                "{}#packages.{}.activationPackage",
+                "{}#homeConfigurations.{}.activationPackage",
                 flake.as_str(),
-                NixSystemName::from_system(system).as_str(),
+                self.home_user().expect("home plan has home user").as_str(),
             ),
         }
-    }
-}
-
-struct NixSystemName(&'static str);
-
-impl NixSystemName {
-    fn from_system(system: System) -> Self {
-        match system {
-            System::X86_64Linux => Self("x86_64-linux"),
-            System::Aarch64Linux => Self("aarch64-linux"),
-        }
-    }
-
-    fn as_str(&self) -> &str {
-        self.0
     }
 }
 
@@ -256,7 +241,7 @@ impl NixBuild {
     /// `builder` is set. Exposed so tests can assert wire shape
     /// without spawning nix.
     pub fn nix_invocation(&self) -> ProcessInvocation {
-        let target_attr = self.plan.target_attr(&self.flake, self.system);
+        let target_attr = self.plan.target_attr(&self.flake);
         let arguments = match self.plan.nix_operation() {
             NixOperation::EvalDrvPath => vec![
                 "eval".to_string(),
