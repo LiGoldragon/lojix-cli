@@ -168,6 +168,13 @@ impl HomeWrapperDir {
     }
 
     pub fn write(&self, spec: HomeWrapperSpec<'_>) -> Result<()> {
+        let lock = self.0.join("flake.lock");
+        match std::fs::remove_file(lock) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+
         let horizon_dir = self.0.join("horizon");
         std::fs::create_dir_all(&horizon_dir)?;
         let json = serde_json::to_string_pretty(spec.horizon)?;
