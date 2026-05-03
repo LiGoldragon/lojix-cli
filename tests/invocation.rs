@@ -110,7 +110,7 @@ fn nix_home_build_arguments_use_home_activation_package_attr() {
     );
     assert!(
         !arguments.iter().any(|argument| argument == "deployment"),
-        "home wrapper must not receive CriomOS deployment override"
+        "direct home evaluation must not receive CriomOS deployment override"
     );
 }
 

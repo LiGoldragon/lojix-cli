@@ -20,8 +20,8 @@ The current implementation supports:
 - `FullOs`: system generation with Home Manager included.
 - `OsOnly`: system generation with Home Manager excluded for that
   CriomOS evaluation.
-- `HomeOnly`: one user's Home Manager activation package, built from
-  `CriomOS-home` through a generated direct Home Manager wrapper.
+- `HomeOnly`: one user's Home Manager activation package, built by
+  evaluating `CriomOS-home` directly.
 - Inline Nota requests, request files, and a no-argument default config.
 - Remote system and home builders selected from projected horizon nodes.
 - Local or remote Home Manager profile setting and activation.
@@ -169,21 +169,14 @@ nixosConfigurations.target
 ### `HomeOnly`
 
 `HomeOnly` builds one user's Home Manager activation package without
-evaluating the CriomOS flake. `lojix-cli` generates a small wrapper
-flake that consumes:
+evaluating the CriomOS flake. `lojix-cli` evaluates the requested
+`CriomOS-home` flake directly and passes the same generated `horizon`
+and `system` inputs that CriomOS receives.
+
+The build target is the requested home flake's Home Manager output:
 
 ```text
-CriomOS-home.homeModules.default
-projected horizon
-projected system
-CriomOS-pkgs
-CriomOS-lib
-```
-
-The build target is the wrapper's package output:
-
-```text
-packages.<system>.activationPackage
+homeConfigurations.<user>.activationPackage
 ```
 
 Before Nix runs, `lojix-cli` checks that the requested user exists in
@@ -351,3 +344,7 @@ design records for the current shape are:
 
 - `reports/0001-three-deploy-kind-split.md`
 - `reports/0002-code-standards-remediation.md`
+- `reports/0003-direct-home-deploy.md`
+- `reports/0004-pure-local-generated-inputs.md`
+- `reports/0005-handoff-pure-inputs-direct-home.md`
+- `reports/0006-archive-hosting-review.md`
