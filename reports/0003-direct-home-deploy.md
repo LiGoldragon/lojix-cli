@@ -103,6 +103,12 @@ with its `system` input following the projected target system, and
 `criomos-lib` provides shared non-host-specific data used by both
 CriomOS and CriomOS-home.
 
+`CriomOS-pkgs` owns the nixpkgs revision for direct home deploys. The
+generated wrapper's root `nixpkgs` input should follow `pkgs/nixpkgs`,
+and `CriomOS-home` should follow that root. The wrapper must not make
+`CriomOS-pkgs` follow `CriomOS-home`'s nixpkgs; that inverts ownership
+and lets the home repo accidentally choose the package universe.
+
 ## Home Manager Interface
 
 Home Manager's flake library exposes:
@@ -187,12 +193,12 @@ directory and avoids root-owned profile or state files.
   inputs = {
     criomos-home.url = "github:LiGoldragon/CriomOS-home/main";
     home-manager.follows = "criomos-home/home-manager";
-    nixpkgs.follows = "criomos-home/nixpkgs";
+    nixpkgs.follows = "pkgs/nixpkgs";
+    criomos-home.inputs.nixpkgs.follows = "nixpkgs";
 
     criomos-lib.url = "github:LiGoldragon/CriomOS-lib/main";
     system.url = "path:./system";
     pkgs.url = "github:LiGoldragon/CriomOS-pkgs";
-    pkgs.inputs.nixpkgs.follows = "nixpkgs";
     pkgs.inputs.system.follows = "system";
 
     horizon.url = "path:./horizon";
@@ -320,6 +326,8 @@ Add direct-home-specific validation:
 - wrapper generation must not import CriomOS;
 - wrapper generation must use CriomOS-pkgs or otherwise provide the
   `pkgs` shape CriomOS-home expects.
+- wrapper generation must let CriomOS-pkgs own nixpkgs and make
+  CriomOS-home follow that package universe.
 - wrapper generation must satisfy the home-used `constants` argument
   through `CriomOS-lib`, or eliminate that argument from CriomOS-home.
 - remote `Profile` and `Activate` must copy the closure to the target

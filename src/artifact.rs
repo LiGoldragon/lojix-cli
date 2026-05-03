@@ -175,12 +175,12 @@ impl HomeWrapperDir {
              \x20 inputs = {{\n\
              \x20   criomos-home.url = {home};\n\
              \x20   home-manager.follows = \"criomos-home/home-manager\";\n\
-             \x20   nixpkgs.follows = \"criomos-home/nixpkgs\";\n\
+             \x20   nixpkgs.follows = \"pkgs/nixpkgs\";\n\
+             \x20   criomos-home.inputs.nixpkgs.follows = \"nixpkgs\";\n\
              \x20   criomos-lib.url = \"github:LiGoldragon/CriomOS-lib/main\";\n\
              \x20   criomos-home.inputs.criomos-lib.follows = \"criomos-lib\";\n\
              \x20   system.url = \"path:./system\";\n\
              \x20   pkgs.url = \"github:LiGoldragon/CriomOS-pkgs/main\";\n\
-             \x20   pkgs.inputs.nixpkgs.follows = \"nixpkgs\";\n\
              \x20   pkgs.inputs.system.follows = \"system\";\n\
              \x20   horizon.url = \"path:./horizon\";\n\
              \x20 }};\n\
