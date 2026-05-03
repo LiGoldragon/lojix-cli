@@ -2,8 +2,9 @@
 name    = "lojix-cli"
 version = "0.1.0"
 edition = "2024"
-description = "Forked development repo for the next generation of the CriomOS deploy CLI."
+description = "CriomOS deploy CLI."
 license-file = "LICENSE.md"
+repository = "https://github.com/LiGoldragon/lojix-cli"
 
 [[bin]]
 name = "lojix-cli"

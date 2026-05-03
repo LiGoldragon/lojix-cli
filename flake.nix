@@ -1,5 +1,5 @@
 {
-  description = "Forked development repo for the next generation of the CriomOS deploy CLI.";
+  description = "CriomOS deploy CLI.";
 
   inputs = {
     nixpkgs.url = "github:LiGoldragon/nixpkgs?ref=main";
