@@ -150,6 +150,7 @@ pub struct HomeWrapperCacheKey<'key> {
 
 pub struct HomeWrapperSpec<'spec> {
     pub home: &'spec FlakeRef,
+    pub horizon: &'spec Horizon,
     pub user: &'spec UserName,
     pub system: System,
 }
@@ -167,6 +168,20 @@ impl HomeWrapperDir {
     }
 
     pub fn write(&self, spec: HomeWrapperSpec<'_>) -> Result<()> {
+        let horizon_dir = self.0.join("horizon");
+        std::fs::create_dir_all(&horizon_dir)?;
+        let json = serde_json::to_string_pretty(spec.horizon)?;
+        std::fs::write(horizon_dir.join("horizon.json"), json)?;
+        std::fs::write(horizon_dir.join("flake.nix"), HORIZON_FLAKE_TEMPLATE)?;
+
+        let system_dir = self.0.join("system");
+        std::fs::create_dir_all(&system_dir)?;
+        let mut system_flake = String::new();
+        system_flake.push_str(SYSTEM_FLAKE_TEMPLATE_PREFIX);
+        system_flake.push_str(NixSystemName::from_system(spec.system).as_str());
+        system_flake.push_str(SYSTEM_FLAKE_TEMPLATE_SUFFIX);
+        std::fs::write(system_dir.join("flake.nix"), system_flake)?;
+
         let system = NixSystemName::from_system(spec.system);
         let user = spec.user.as_str();
         let home = spec.home.nix_string_literal();
@@ -337,6 +352,7 @@ impl ArtifactMaterialization {
                 })?;
                 dir.write(HomeWrapperSpec {
                     home: &home.home,
+                    horizon: &self.horizon,
                     user: &home.user,
                     system: self.horizon.node.system,
                 })?;
