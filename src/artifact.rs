@@ -212,11 +212,12 @@ impl HomeWrapperDir {
              \x20     extraSpecialArgs = {{ inherit horizon user; }};\n\
              \x20     modules = [\n\
              \x20       inputs.criomos-home.homeModules.default\n\
-             \x20       {{\n\
+             \x20       ({{ lib, ... }}: {{\n\
+             \x20         nixpkgs.overlays = lib.mkForce pkgs.overlays;\n\
              \x20         home.username = userName;\n\
              \x20         home.homeDirectory = \"/home/${{userName}}\";\n\
              \x20         home.stateVersion = \"26.05\";\n\
-             \x20       }}\n\
+             \x20       }})\n\
              \x20     ];\n\
              \x20   }};\n\
              \x20 in {{\n\
