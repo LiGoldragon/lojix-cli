@@ -115,6 +115,25 @@ the ecosystem controls when nixpkgs advances. Upstream NixOS/nixpkgs
 is consumed by updating the fork, not by individual repos following
 upstream directly.
 
+The direct wrapper must also preserve the same effective Home Manager
+package overlay set as the NixOS-integrated path. Standalone Home
+Manager imports its `nixpkgs` module and merges `nixpkgs.overlays`
+from modules such as Stylix. In the NixOS-integrated path,
+`home-manager.useGlobalPkgs` plus CriomOS's read-only pkgs keeps Home
+Manager on the already-instantiated CriomOS-pkgs package set. If the
+direct wrapper lets standalone Home Manager extend overlays, packages
+that happen to depend on themed libraries can drift; observed example:
+Stylix added a `gtksourceview` post-fixup, which changed Inkscape's
+derivation even though nixpkgs and CriomOS-pkgs were pinned correctly.
+The wrapper therefore forces:
+
+```nix
+nixpkgs.overlays = lib.mkForce pkgs.overlays;
+```
+
+This keeps the CriomOS-pkgs overlays (`open-vsx`, local check
+overrides, etc.) while preventing Home Manager-only overlay mutation.
+
 ## Home Manager Interface
 
 Home Manager's flake library exposes:
@@ -285,6 +304,14 @@ The wrapper flake either embeds the selected `home` flake ref in its
 `inputs.criomos-home.url`, or points to a local path/ref if the request
 uses one.
 
+The wrapper must be self-contained for remote builds. Its `system` and
+`horizon` inputs are relative paths (`path:./system` and
+`path:./horizon`), so wrapper materialization writes those subflakes
+inside the wrapper directory instead of relying on sibling cache
+directories. This makes rsyncing only `home-wrapper` to a remote
+builder sufficient and avoids source-copy failures during lock-file
+resolution.
+
 The `deployment` input is not needed for direct home builds because
 CriomOS is not being evaluated.
 
@@ -315,6 +342,25 @@ or:
 
 The package attr is simpler because the wrapper already knows the
 selected user and target system.
+
+## Build Observations
+
+After pinning `LiGoldragon/nixpkgs/main` to the working nixpkgs
+revision and pinning `CriomOS-pkgs`'s `nix-vscode-extensions` input to
+the working overlay revision, direct-home still planned an Inkscape
+build. The cause was not nixpkgs: it was standalone Home Manager
+applying Stylix overlays to the package set. Forcing
+`nixpkgs.overlays` to the base `pkgs.overlays` made direct-home's
+Inkscape and `gtksourceview` derivations match the system-integrated
+CriomOS evaluation.
+
+The remaining planned builds after that fix were legitimate current
+`CriomOS-home/main` changes, not direct-home drift: current home input
+pins evaluate newer `codex`, `claude-code`, `noctalia`, and
+`quickshell` artefacts than the active local Home Manager profile.
+Those were not present in the local store or on the tested remote
+builder at the time of the attempt, so deploying latest home-only
+would require building or substituting those artefacts first.
 
 ## Validation
 
