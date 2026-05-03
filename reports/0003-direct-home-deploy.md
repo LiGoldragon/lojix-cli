@@ -136,6 +136,47 @@ homeConfigurations."<user>@<node>".activationPackage
 For lojix's build machinery, a simple package attr is enough and keeps
 the target attr independent of user-facing Home Manager CLI naming.
 
+## Remote Home Deploy
+
+`HomeOnly` must support remote use. Bypassing CriomOS means bypassing
+the CriomOS flake evaluation, not restricting activation to the
+dispatcher host.
+
+The remote sequence is:
+
+```text
+project horizon for target node
+materialize horizon/system/home-wrapper inputs
+stage wrapper inputs onto builder when builder is set
+build activation package locally or on builder
+copy resulting closure to target when activation is requested
+run profile/activate as the requested Unix user on the target
+```
+
+The builder field has the same meaning for `HomeOnly` as for system
+deploys:
+
+- omitted builder: build on dispatcher;
+- builder equal to target node: build on the target;
+- builder equal to another builder node: build there, then copy to
+  target.
+
+`HomeOnly Build` does not activate and therefore does not need a target
+copy. `HomeOnly Profile` and `HomeOnly Activate` both require the
+closure to exist on the target before the profile command runs.
+
+Remote home activation must use the requested Unix user, not root. The
+profile command is the same command currently used locally:
+
+```text
+nix-env -p ~/.local/state/nix/profiles/home-manager --set <activationPackage>
+```
+
+For `Activate`, lojix runs the generation's `activate` script after
+setting the profile. The remote command must run through SSH as the
+target user. That keeps Home Manager state in the target user's home
+directory and avoids root-owned profile or state files.
+
 ## Wrapper Flake Shape
 
 `lojix-cli` should materialize a generated direct-home flake for each
@@ -268,10 +309,8 @@ selected user and target system.
 Keep the existing validations:
 
 - projected horizon must contain the requested user;
-- `Profile` and `Activate` must run on the requested Unix user;
+- `Profile` and `Activate` must run as the requested Unix user;
 - `Profile` and `Activate` must run on the requested node;
-- remote builders remain unsupported for `HomeOnly` until a separate
-  user/remote activation design exists.
 
 Add direct-home-specific validation:
 
@@ -283,6 +322,10 @@ Add direct-home-specific validation:
   `pkgs` shape CriomOS-home expects.
 - wrapper generation must satisfy the home-used `constants` argument
   through `CriomOS-lib`, or eliminate that argument from CriomOS-home.
+- remote `Profile` and `Activate` must copy the closure to the target
+  before running the profile command;
+- remote `Profile` and `Activate` must execute through SSH as the
+  requested user.
 
 ## Implementation Plan
 
@@ -293,12 +336,18 @@ Add direct-home-specific validation:
    Home Manager activation package.
 4. Split build target selection so `BuildPlan::Home` uses the generated
    home wrapper, not the CriomOS flake.
-5. Keep `FullOs` and `OsOnly` on the CriomOS path with `deployment`.
-6. Update request, invocation, and eval tests so `HomeOnly` proves no
+5. Teach `HomeOnly` to accept validated remote builders using the same
+   builder rules as system deploys.
+6. Teach home activation to copy the closure to the target for
+   `Profile` and `Activate`, then run profile/activation locally only
+   when the target is the dispatcher and remotely as the requested user
+   otherwise.
+7. Keep `FullOs` and `OsOnly` on the CriomOS path with `deployment`.
+8. Update request, invocation, and eval tests so `HomeOnly` proves no
    CriomOS attr appears in the Nix target.
-7. Update README to state that `HomeOnly` consumes CriomOS-home
+9. Update README to state that `HomeOnly` consumes CriomOS-home
    directly.
-8. Run a direct `HomeOnly Build` first, then `Profile`, then only run
+10. Run a direct `HomeOnly Build` first, then `Profile`, then only run
    `Activate` intentionally because live HM activation can mutate the
    graphical session.
 
