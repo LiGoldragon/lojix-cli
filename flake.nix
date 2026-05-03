@@ -2,7 +2,7 @@
   description = "Forked development repo for the next generation of the CriomOS deploy CLI.";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:LiGoldragon/nixpkgs?ref=nixos-unstable";
 
     fenix.url = "github:nix-community/fenix";
     fenix.inputs.nixpkgs.follows = "nixpkgs";

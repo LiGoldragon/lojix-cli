@@ -109,6 +109,12 @@ and `CriomOS-home` should follow that root. The wrapper must not make
 `CriomOS-pkgs` follow `CriomOS-home`'s nixpkgs; that inverts ownership
 and lets the home repo accidentally choose the package universe.
 
+The package universe source is the `LiGoldragon/nixpkgs` fork. CriomOS,
+CriomOS-home, CriomOS-pkgs, and lojix-cli all point at that fork so
+the ecosystem controls when nixpkgs advances. Upstream NixOS/nixpkgs
+is consumed by updating the fork, not by individual repos following
+upstream directly.
+
 ## Home Manager Interface
 
 Home Manager's flake library exposes:
