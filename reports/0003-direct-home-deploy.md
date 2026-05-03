@@ -1,0 +1,312 @@
+# Direct Home Deploy
+
+## Question
+
+`HomeOnly` is meant to bypass the CriomOS flake. The current
+implementation does not: it builds a Home Manager activation package
+through:
+
+```text
+<criomos>#nixosConfigurations.target.config.home-manager.users.<user>.home.activationPackage
+```
+
+That still evaluates the full CriomOS NixOS configuration and consumes
+`CriomOS-home` only through CriomOS's `criomos-home` input. This misses
+the point of fast home iteration against the home repo itself.
+
+## Current Facts
+
+`CriomOS-home` exposes:
+
+```text
+homeModules.default
+```
+
+It does not currently expose standalone `homeConfigurations`.
+
+Its top aggregate is designed to work in both contexts:
+
+```text
+modules/home/default.nix
+```
+
+The module expects these arguments:
+
+```text
+horizon
+user
+inputs
+```
+
+The flake wrapper around `homeModules.default` already imports upstream
+home modules from `stylix`, `niri-flake`, and `noctalia`, and forces
+`_module.args.inputs` to CriomOS-home's own inputs. That part is
+correct for direct consumption.
+
+The existing CriomOS NixOS path adds the per-user pieces outside
+CriomOS-home:
+
+```nix
+home-manager.extraSpecialArgs = {
+  inherit horizon constants;
+};
+home-manager.sharedModules = [ inputs.criomos-home.homeModules.default ];
+home-manager.users = mapAttrs mkUserConfig horizon.users;
+```
+
+The direct path must recreate only the Home Manager evaluation, not
+the NixOS system.
+
+One current `CriomOS-home` module also expects:
+
+```text
+constants
+```
+
+Today only `constants.fileSystem.screenshots` is used by home code.
+That value currently originates in CriomOS's `modules/nixos/constants.nix`,
+but direct home deployment must not import or evaluate the CriomOS
+flake. If a value is needed by both CriomOS and CriomOS-home, it belongs
+in `CriomOS-lib`, whose flake is already described as shared helpers
+and data consumed by both repos. Importing CriomOS just to get constants
+would reintroduce the dependency this deploy kind exists to avoid.
+
+## Important Wrinkle: Pkgs
+
+CriomOS-home modules assume the `pkgs` they receive has CriomOS-pkgs
+overlays and `allowUnfree = true`. The VSCodium module specifically
+uses:
+
+```text
+pkgs.open-vsx
+pkgs.vscode-utils.buildVscodeMarketplaceExtension
+pkgs.vscode-extensions.*
+```
+
+`pkgs.open-vsx` comes from the `CriomOS-pkgs` overlay, not plain
+nixpkgs. Therefore a direct home wrapper should not instantiate bare
+nixpkgs unless CriomOS-home first stops relying on that overlay.
+
+The right direct home build inputs are:
+
+```text
+criomos-home
+home-manager
+pkgs
+horizon
+system
+criomos-lib
+```
+
+where `pkgs` is the same `CriomOS-pkgs` flake style used by CriomOS,
+with its `system` input following the projected target system, and
+`criomos-lib` provides shared non-host-specific data used by both
+CriomOS and CriomOS-home.
+
+## Home Manager Interface
+
+Home Manager's flake library exposes:
+
+```nix
+home-manager.lib.homeManagerConfiguration {
+  pkgs = ...;
+  modules = [ ... ];
+  extraSpecialArgs = { ... };
+}
+```
+
+The returned value has:
+
+```text
+activationPackage
+```
+
+So a direct wrapper flake can expose one package:
+
+```text
+packages.<system>.activationPackage
+```
+
+or a Home Manager-compatible output:
+
+```text
+homeConfigurations."<user>@<node>".activationPackage
+```
+
+For lojix's build machinery, a simple package attr is enough and keeps
+the target attr independent of user-facing Home Manager CLI naming.
+
+## Wrapper Flake Shape
+
+`lojix-cli` should materialize a generated direct-home flake for each
+`HomeOnly` request. The generated flake should be small and explicit:
+
+```nix
+{
+  inputs = {
+    criomos-home.url = "github:LiGoldragon/CriomOS-home/main";
+    home-manager.follows = "criomos-home/home-manager";
+    nixpkgs.follows = "criomos-home/nixpkgs";
+
+    criomos-lib.url = "github:LiGoldragon/CriomOS-lib/main";
+    system.url = "path:./system";
+    pkgs.url = "github:LiGoldragon/CriomOS-pkgs";
+    pkgs.inputs.nixpkgs.follows = "nixpkgs";
+    pkgs.inputs.system.follows = "system";
+
+    horizon.url = "path:./horizon";
+  };
+
+  outputs = inputs:
+  let
+    system = inputs.system.system;
+    pkgs = inputs.pkgs.pkgs;
+    horizon = inputs.horizon.horizon;
+    userName = "...";
+    user = horizon.users.${userName};
+
+    home = inputs.home-manager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      extraSpecialArgs = {
+        inherit horizon user;
+        constants = inputs.criomos-lib.lib.constants;
+      };
+      modules = [
+        inputs.criomos-home.homeModules.default
+        {
+          home.stateVersion = "26.05";
+        }
+      ];
+    };
+  in {
+    packages.${system}.activationPackage = home.activationPackage;
+    homeConfigurations.${userName} = home;
+  };
+}
+```
+
+The exact attr can be chosen during implementation. The important
+part is that the attr is under the generated wrapper flake, not under
+CriomOS.
+
+## Lojix Request Shape
+
+The current `HomeOnly` field named `criomos` is wrong for direct home
+deploys. The request should carry a home flake reference:
+
+```nota
+(HomeOnly cluster node user source home mode builder?)
+```
+
+where `home` is usually:
+
+```text
+github:LiGoldragon/CriomOS-home/main
+```
+
+The field remains positional in Nota, but the Rust struct should rename
+it from `criomos` to `home` so the type reads correctly.
+
+`FullOs` and `OsOnly` keep the CriomOS flake field.
+
+## Materialized Inputs
+
+Current system/home-through-CriomOS materialization creates:
+
+```text
+horizon
+system
+deployment
+```
+
+Direct home materialization should create:
+
+```text
+horizon
+system
+home-wrapper
+CriomOS-lib
+```
+
+The wrapper flake either embeds the selected `home` flake ref in its
+`inputs.criomos-home.url`, or points to a local path/ref if the request
+uses one.
+
+The `deployment` input is not needed for direct home builds because
+CriomOS is not being evaluated.
+
+The wrapper also needs the shared constants from `CriomOS-lib` unless
+`CriomOS-home` moves `constants.fileSystem.screenshots` into its own
+module defaults first. This must come from the shared lib input, not
+from CriomOS.
+
+## Build Target
+
+Current `HomeOnly` target attr:
+
+```text
+<criomos>#nixosConfigurations.target.config.home-manager.users.<user>.home.activationPackage
+```
+
+Direct target attr:
+
+```text
+<home-wrapper>#packages.<system>.activationPackage
+```
+
+or:
+
+```text
+<home-wrapper>#homeConfigurations.<user>.activationPackage
+```
+
+The package attr is simpler because the wrapper already knows the
+selected user and target system.
+
+## Validation
+
+Keep the existing validations:
+
+- projected horizon must contain the requested user;
+- `Profile` and `Activate` must run on the requested Unix user;
+- `Profile` and `Activate` must run on the requested node;
+- remote builders remain unsupported for `HomeOnly` until a separate
+  user/remote activation design exists.
+
+Add direct-home-specific validation:
+
+- the home flake ref must be a branch/ref style operator-facing flake
+  ref, not a pasted commit hash in docs/examples/configs;
+- Nix build/eval still uses `--refresh`;
+- wrapper generation must not import CriomOS;
+- wrapper generation must use CriomOS-pkgs or otherwise provide the
+  `pkgs` shape CriomOS-home expects.
+- wrapper generation must satisfy the home-used `constants` argument
+  through `CriomOS-lib`, or eliminate that argument from CriomOS-home.
+
+## Implementation Plan
+
+1. Rename `HomeOnly.criomos` to `HomeOnly.home` in Rust.
+2. Move shared constants needed by home into `CriomOS-lib`, then update
+   CriomOS and CriomOS-home consumers to use the lib value.
+3. Add a `HomeWrapperDir` materializer that writes a flake exposing one
+   Home Manager activation package.
+4. Split build target selection so `BuildPlan::Home` uses the generated
+   home wrapper, not the CriomOS flake.
+5. Keep `FullOs` and `OsOnly` on the CriomOS path with `deployment`.
+6. Update request, invocation, and eval tests so `HomeOnly` proves no
+   CriomOS attr appears in the Nix target.
+7. Update README to state that `HomeOnly` consumes CriomOS-home
+   directly.
+8. Run a direct `HomeOnly Build` first, then `Profile`, then only run
+   `Activate` intentionally because live HM activation can mutate the
+   graphical session.
+
+## Decision
+
+`HomeOnly` should bypass CriomOS. The right shape is not to add another
+CriomOS output; it is to generate a small standalone Home Manager
+wrapper flake that consumes `CriomOS-home.homeModules.default` directly
+with lojix-projected `horizon`, selected `user`, target `system`, and
+the CriomOS-pkgs package set. Shared data needed by that path must live
+in `CriomOS-lib`, not in CriomOS.
