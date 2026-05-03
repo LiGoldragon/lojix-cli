@@ -43,9 +43,6 @@ pub enum Error {
     #[error("builder {0} is not a valid builder in this horizon (is_builder=false or offline)")]
     InvalidBuilder(NodeName),
 
-    #[error("home-only requests do not support remote builder {0}")]
-    UnsupportedHomeBuilder(NodeName),
-
     #[error("user {user} not present in projected horizon users for {cluster}/{node}")]
     UnknownHomeUser {
         user: UserName,

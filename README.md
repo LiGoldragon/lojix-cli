@@ -12,7 +12,7 @@ All operator intent lives in the Nota record.
 
 This repo is the rewrite workspace for the deploy CLI. It is allowed to
 break the old CLI surface so the Nota-native model, the system/home
-deploy split, and local home activation can land in the right shape
+deploy split, and Home Manager activation can land in the right shape
 before cutover.
 
 The current implementation supports:
