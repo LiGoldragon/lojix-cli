@@ -242,6 +242,12 @@ The deployment shape is:
 `HomeOnly` evaluates `CriomOS-home` directly. That flake receives the
 same generated `horizon` and `system` inputs as CriomOS.
 
+When a remote builder is selected, `lojix-cli` first stages the generated
+inputs onto that builder with `rsync`, under a content-keyed directory in
+the builder's temporary storage. The Nix command that runs on the builder
+then receives `path:` refs to those staged remote directories. This keeps
+remote build evaluation independent of dispatcher-local cache paths.
+
 ## Builder Semantics
 
 The optional builder field names a horizon node, not an arbitrary SSH
@@ -256,6 +262,9 @@ Validation rules:
 - `builder == node` is allowed and means "build on the target".
 - A different builder must be present in projected `ex_nodes`.
 - The builder node must have `is_builder = true`.
+
+If `builder == node`, the closure copy phase is skipped because the build
+already happened on the activation target.
 
 SSH always uses key-based batch mode. The target address is derived
 from the projected node's Criome domain name as root SSH, not from a

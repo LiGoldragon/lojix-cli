@@ -13,6 +13,9 @@ use lojix_cli::build::{BuildLocation, BuildPlan, HomeBuildPlan, HomeMode, NixBui
 use lojix_cli::cluster::{FlakeInputRef, FlakeRef, NarHashSri, StorePath};
 use lojix_cli::copy::ClosureCopy;
 use lojix_cli::host::SshTarget;
+use lojix_cli::stage::{
+    GeneratedInput, GeneratedInputName, RemoteInputStage, RemoteInputStageCommand,
+};
 
 fn target_for(node: &str, cluster: &str) -> SshTarget {
     let node = NodeName::try_new(node).unwrap();
@@ -40,10 +43,12 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
 }
 
 fn fixture_input_ref(path: &str) -> FlakeInputRef {
-    FlakeInputRef::from_local_path(
-        Path::new(path),
-        NarHashSri::try_new("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap(),
-    )
+    FlakeInputRef::from_local_path(Path::new(path), fixture_nar_hash('A'))
+}
+
+fn fixture_nar_hash(character: char) -> NarHashSri {
+    let body = std::iter::repeat_n(character, 43).collect::<String>();
+    NarHashSri::try_new(format!("sha256-{body}=")).unwrap()
 }
 
 #[test]
@@ -112,6 +117,66 @@ fn nix_home_build_arguments_use_home_activation_package_attr() {
         !arguments.iter().any(|argument| argument == "deployment"),
         "direct home evaluation must not receive CriomOS deployment override"
     );
+}
+
+#[test]
+fn remote_input_stage_rsyncs_generated_inputs_and_rewrites_refs() {
+    let target = target_for("prometheus", "goldragon");
+    let stage = RemoteInputStage::new(
+        target,
+        vec![
+            GeneratedInput::new(
+                GeneratedInputName::Horizon,
+                "/cache/horizon".into(),
+                fixture_nar_hash('A'),
+            ),
+            GeneratedInput::new(
+                GeneratedInputName::System,
+                "/cache/system".into(),
+                fixture_nar_hash('B'),
+            ),
+        ],
+    );
+
+    let plan = stage.plan();
+    let root = "/var/tmp/lojix/generated-inputs/horizon-aaaaaaaaaaaa_system-bbbbbbbbbbbb";
+
+    assert_eq!(plan.commands().len(), 4);
+    assert!(matches!(
+        plan.commands()[0],
+        RemoteInputStageCommand::MakeDirectory { .. }
+    ));
+    let mkdir = plan.commands()[0].invocation();
+    assert_eq!(mkdir.program(), "ssh");
+    assert_eq!(mkdir.arguments()[2], "root@prometheus.goldragon.criome");
+    assert_eq!(mkdir.arguments()[3], format!("mkdir -p {root}/horizon"));
+
+    assert!(matches!(
+        plan.commands()[1],
+        RemoteInputStageCommand::Synchronize { .. }
+    ));
+    let rsync = plan.commands()[1].invocation();
+    assert_eq!(rsync.program(), "rsync");
+    assert_eq!(
+        rsync.arguments(),
+        [
+            "-a",
+            "--delete",
+            "/cache/horizon/",
+            &format!("root@prometheus.goldragon.criome:{root}/horizon/")
+        ]
+    );
+    assert_eq!(
+        plan.references().horizon_ref.flake_ref(),
+        format!(
+            "path:{root}/horizon?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+        )
+    );
+    assert_eq!(
+        plan.references().system_ref.flake_ref(),
+        format!("path:{root}/system?narHash=sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB%3D")
+    );
+    assert!(plan.references().deployment_ref.is_none());
 }
 
 #[test]

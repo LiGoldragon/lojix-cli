@@ -10,5 +10,6 @@ pub mod process;
 pub mod project;
 pub mod proposal;
 pub mod request;
+pub mod stage;
 
 pub use error::{Error, Result};

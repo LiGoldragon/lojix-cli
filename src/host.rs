@@ -7,7 +7,7 @@ use crate::process::{ProcessInvocation, ShellCommand};
 /// `nix copy --to ssh-ng://…`, and `--from ssh-ng://…`. Constructed
 /// from the projected horizon's `criome_domain_name`; never built
 /// from a literal hostname.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshTarget(String);
 
 impl SshTarget {

@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::host::SshTarget;
 use crate::project::{HorizonProjection, HorizonProjectionInput, HorizonProjector, ProjectMsg};
 use crate::proposal::{ProposalMsg, ProposalReader};
+use crate::stage::{BuildInputReferences, RemoteInputStage};
 
 // No RPC timeout — `nix build` of a NixOS system from cold cache can
 // take hours (substituter fetch + tons of derivations). The right fix
@@ -175,6 +176,15 @@ impl DeployState {
         )
         .into_payload()??;
 
+        let build_inputs = match &builder_target {
+            None => BuildInputReferences::from_local_artifact(&materialized),
+            Some(builder) => {
+                RemoteInputStage::from_artifact(builder.clone(), &materialized)
+                    .run()
+                    .await?
+            }
+        };
+
         let build_flake = match &request.plan {
             BuildPlan::System { .. } => request.flake.clone(),
             BuildPlan::Home { .. } => request.flake.clone(),
@@ -187,9 +197,9 @@ impl DeployState {
                         build: NixBuild {
                             flake: build_flake,
                             system: target_system,
-                            horizon_ref: materialized.horizon_ref.clone(),
-                            system_ref: materialized.system_ref.clone(),
-                            deployment_ref: materialized.deployment_ref.clone(),
+                            horizon_ref: build_inputs.horizon_ref,
+                            system_ref: build_inputs.system_ref,
+                            deployment_ref: build_inputs.deployment_ref,
                             plan: request.plan.clone(),
                             builder: builder_target.clone(),
                         },
