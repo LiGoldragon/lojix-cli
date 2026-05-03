@@ -10,7 +10,7 @@ use horizon_lib::species::System;
 
 use lojix_cli::activate::{BootEntry, HomeActivation, SystemActivation, SystemProfileLink};
 use lojix_cli::build::{BuildLocation, BuildPlan, HomeBuildPlan, HomeMode, NixBuild, SystemAction};
-use lojix_cli::cluster::{FlakeRef, OverrideUri, StorePath};
+use lojix_cli::cluster::{FlakeInputRef, FlakeRef, NarHashSri, StorePath};
 use lojix_cli::copy::ClosureCopy;
 use lojix_cli::host::SshTarget;
 
@@ -25,12 +25,12 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
     let build = NixBuild {
         flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
         system: System::X86_64Linux,
-        horizon_uri: OverrideUri::from_local_path(Path::new("/cache/horizon")),
-        system_uri: OverrideUri::from_local_path(Path::new("/cache/system")),
-        deployment_uri: match plan {
-            BuildPlan::System { .. } => Some(OverrideUri::from_local_path(Path::new(
-                "/cache/deployment/home-on",
-            ))),
+        horizon_ref: fixture_input_ref("https://lojix.example/horizon/abcdef123456.tar.gz"),
+        system_ref: fixture_input_ref("https://lojix.example/system/abcdef123456.tar.gz"),
+        deployment_ref: match plan {
+            BuildPlan::System { .. } => Some(fixture_input_ref(
+                "https://lojix.example/deployment/abcdef123456.tar.gz",
+            )),
             BuildPlan::Home { .. } => None,
         },
         plan,
@@ -39,6 +39,13 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
     let invocation = build.nix_invocation();
     assert_eq!(invocation.program(), "nix");
     invocation.arguments().to_vec()
+}
+
+fn fixture_input_ref(url: &str) -> FlakeInputRef {
+    FlakeInputRef::from_archive_url(
+        url,
+        NarHashSri::try_new("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap(),
+    )
 }
 
 #[test]
@@ -53,19 +60,25 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
         .iter()
         .position(|argument| argument == "horizon")
         .expect("horizon flag");
-    assert_eq!(arguments[horizon_index + 1], "path:/cache/horizon");
+    assert_eq!(
+        arguments[horizon_index + 1],
+        "https://lojix.example/horizon/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+    );
     let system_index = arguments
         .iter()
         .position(|argument| argument == "system")
         .expect("system flag");
-    assert_eq!(arguments[system_index + 1], "path:/cache/system");
+    assert_eq!(
+        arguments[system_index + 1],
+        "https://lojix.example/system/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+    );
     let deployment_index = arguments
         .iter()
         .position(|argument| argument == "deployment")
         .expect("deployment flag");
     assert_eq!(
         arguments[deployment_index + 1],
-        "path:/cache/deployment/home-on"
+        "https://lojix.example/deployment/abcdef123456.tar.gz?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
     );
 }
 

@@ -1,8 +1,8 @@
 # ARCHITECTURE — lojix-cli
 
 This is the CriomOS deploy CLI. It is the Nota-native operator tool for
-projecting a cluster proposal through `horizon-rs`, materializing the
-small flake inputs needed for a deploy, and dispatching Nix build /
+projecting a cluster proposal through `horizon-rs`, publishing the small
+generated flake inputs needed for a deploy, and dispatching Nix build /
 activation work locally or through an SSH builder.
 
 ## Role
@@ -38,6 +38,8 @@ What does not live here:
   coordinator; projection, artifact, build, copy, and activation flow
 - [src/build.rs](src/build.rs): typed build plans, target attr selection,
   deployment-shape selection, and remote-builder execution
+- [src/publish.rs](src/publish.rs): archive publication for generated
+  flake inputs
 - [src/activate.rs](src/activate.rs):
   system activation plus local home profile / activation behavior
 - [tests/](tests): argv-shape and
@@ -50,6 +52,8 @@ What does not live here:
   `nixosConfigurations.target`.
 - Home-only deploys bypass CriomOS and build a generated standalone
   Home Manager wrapper around `CriomOS-home.homeModules.default`.
+- Generated deploy inputs are consumed as archive flake refs carrying
+  NAR hashes, not as mutable local paths.
 - Nota is the canonical operator-facing data format.
 
 ## Status

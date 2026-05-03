@@ -3,7 +3,7 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use horizon_lib::name::UserName;
 use horizon_lib::species::System;
 
-use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, StorePath};
+use crate::cluster::{DerivationPath, FlakeInputRef, FlakeRef, StorePath};
 use crate::error::Result;
 use crate::host::SshTarget;
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
@@ -243,9 +243,9 @@ pub enum BuildPhaseOutcome {
 pub struct NixBuild {
     pub flake: FlakeRef,
     pub system: System,
-    pub horizon_uri: OverrideUri,
-    pub system_uri: OverrideUri,
-    pub deployment_uri: Option<OverrideUri>,
+    pub horizon_ref: FlakeInputRef,
+    pub system_ref: FlakeInputRef,
+    pub deployment_ref: Option<FlakeInputRef>,
     pub plan: BuildPlan,
     pub builder: Option<SshTarget>,
 }
@@ -277,16 +277,16 @@ impl NixBuild {
             .with_arguments([
                 "--override-input".to_string(),
                 "horizon".to_string(),
-                self.horizon_uri.as_str().to_string(),
+                self.horizon_ref.flake_ref(),
                 "--override-input".to_string(),
                 "system".to_string(),
-                self.system_uri.as_str().to_string(),
+                self.system_ref.flake_ref(),
             ]);
-        if let Some(deployment_uri) = &self.deployment_uri {
+        if let Some(deployment_ref) = &self.deployment_ref {
             invocation = invocation.with_arguments([
                 "--override-input".to_string(),
                 "deployment".to_string(),
-                deployment_uri.as_str().to_string(),
+                deployment_ref.flake_ref(),
             ]);
         }
         invocation

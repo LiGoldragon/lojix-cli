@@ -9,13 +9,13 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, SystemActivation};
 use crate::artifact::{
     ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HomeMaterialization,
-    HorizonArtifact, MaterializedArtifact,
+    HorizonArtifact,
 };
 use crate::build::{BuildMsg, BuildPhaseOutcome, BuildPlan, HomeMode, NixBuild, NixBuilder};
-use crate::cluster::{DerivationPath, FlakeRef, OverrideUri, ProposalSource, StorePath};
+use crate::cluster::{DerivationPath, FlakeRef, ProposalSource, StorePath};
 use crate::copy::{ClosureCopier, ClosureCopy, CopyMsg};
 use crate::error::{Error, Result};
-use crate::host::{RemoteRsync, RemoteStaging, SshTarget};
+use crate::host::SshTarget;
 use crate::project::{HorizonProjection, HorizonProjectionInput, HorizonProjector, ProjectMsg};
 use crate::proposal::{ProposalMsg, ProposalReader};
 
@@ -183,26 +183,14 @@ impl DeployState {
         )
         .into_payload()??;
 
-        // Stage override-input dirs onto the builder if we're
-        // building remote. The URIs we hand to `nix build` then
-        // resolve on the builder's filesystem. When no builder is
-        // set the dispatcher's local cache paths are used as-is.
-        let staged_inputs = self
-            .stage_inputs(StageInputsRequest {
-                materialized: &materialized,
-                builder: builder_target.as_ref(),
-            })
-            .await?;
-
         let build_flake = match &request.plan {
             BuildPlan::System { .. } => request.flake.clone(),
             BuildPlan::Home { .. } => FlakeRef::new(
-                staged_inputs
-                    .home_wrapper_uri
+                materialized
+                    .home_wrapper_ref
                     .as_ref()
                     .expect("home wrapper materialized for home plan")
-                    .as_str()
-                    .to_string(),
+                    .flake_ref(),
             ),
         };
 
@@ -213,9 +201,9 @@ impl DeployState {
                         build: NixBuild {
                             flake: build_flake,
                             system: target_system,
-                            horizon_uri: staged_inputs.horizon_uri.clone(),
-                            system_uri: staged_inputs.system_uri.clone(),
-                            deployment_uri: staged_inputs.deployment_uri.clone(),
+                            horizon_ref: materialized.horizon_ref.clone(),
+                            system_ref: materialized.system_ref.clone(),
+                            deployment_ref: materialized.deployment_ref.clone(),
                             plan: request.plan.clone(),
                             builder: builder_target.clone(),
                         },
@@ -227,86 +215,13 @@ impl DeployState {
         )
         .into_payload()??;
 
-        let result = self
-            .finish(FinishRequest {
-                plan: request.plan,
-                node: request.node.clone(),
-                target,
-                outcome,
-            })
-            .await;
-        if let Some(staging) = staged_inputs.staging {
-            // Best-effort cleanup. A leftover /tmp/lojix-stage.*
-            // dir doesn't break anything but we surface failures
-            // rather than swallow them silently — only by
-            // overwriting `result` if it was Ok and cleanup
-            // failed; if `result` was already Err, that takes
-            // priority.
-            match staging.cleanup().await {
-                Ok(()) => {}
-                Err(error) if result.is_ok() => return Err(error),
-                Err(error) => {
-                    eprintln!("warning: staging cleanup failed: {error}");
-                }
-            }
-        }
-        result
-    }
-
-    async fn stage_inputs(&self, request: StageInputsRequest<'_>) -> Result<StagedInputs> {
-        match request.builder {
-            None => Ok(StagedInputs {
-                horizon_uri: request.materialized.horizon_uri.clone(),
-                system_uri: request.materialized.system_uri.clone(),
-                deployment_uri: request.materialized.deployment_uri.clone(),
-                home_wrapper_uri: request.materialized.home_wrapper_uri.clone(),
-                staging: None,
-            }),
-            Some(target) => {
-                let staging = RemoteStaging::try_create(target.clone()).await?;
-                let horizon_uri = staging
-                    .rsync(RemoteRsync {
-                        local_dir: request.materialized.horizon_dir.path(),
-                        name: "horizon",
-                    })
-                    .await?;
-                let system_uri = staging
-                    .rsync(RemoteRsync {
-                        local_dir: request.materialized.system_dir.path(),
-                        name: "system",
-                    })
-                    .await?;
-                let deployment_uri = match &request.materialized.deployment_dir {
-                    None => None,
-                    Some(deployment_dir) => Some(
-                        staging
-                            .rsync(RemoteRsync {
-                                local_dir: deployment_dir.path(),
-                                name: "deployment",
-                            })
-                            .await?,
-                    ),
-                };
-                let home_wrapper_uri = match &request.materialized.home_wrapper_dir {
-                    None => None,
-                    Some(home_wrapper_dir) => Some(
-                        staging
-                            .rsync(RemoteRsync {
-                                local_dir: home_wrapper_dir.path(),
-                                name: "home-wrapper",
-                            })
-                            .await?,
-                    ),
-                };
-                Ok(StagedInputs {
-                    horizon_uri,
-                    system_uri,
-                    deployment_uri,
-                    home_wrapper_uri,
-                    staging: Some(staging),
-                })
-            }
-        }
+        self.finish(FinishRequest {
+            plan: request.plan,
+            node: request.node.clone(),
+            target,
+            outcome,
+        })
+        .await
     }
 
     async fn finish(&self, request: FinishRequest) -> Result<DeployOutcome> {
@@ -399,19 +314,6 @@ impl DeployState {
             }
         }
     }
-}
-
-struct StageInputsRequest<'request> {
-    materialized: &'request MaterializedArtifact,
-    builder: Option<&'request SshTarget>,
-}
-
-struct StagedInputs {
-    horizon_uri: OverrideUri,
-    system_uri: OverrideUri,
-    deployment_uri: Option<OverrideUri>,
-    home_wrapper_uri: Option<OverrideUri>,
-    staging: Option<RemoteStaging>,
 }
 
 struct FinishRequest {

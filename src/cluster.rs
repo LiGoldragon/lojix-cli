@@ -55,20 +55,41 @@ impl FlakeRef {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct OverrideUri(String);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlakeInputRef {
+    url: String,
+    nar_hash: NarHashSri,
+}
 
-impl OverrideUri {
-    pub fn from_local_path(path: &Path) -> Self {
-        Self(format!("path:{}", path.display()))
+impl FlakeInputRef {
+    pub fn from_archive_url(url: impl Into<String>, nar_hash: NarHashSri) -> Self {
+        Self {
+            url: url.into(),
+            nar_hash,
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.url
+    }
+
+    pub fn flake_ref(&self) -> String {
+        format!("{}?narHash={}", self.url, self.nar_hash.as_url_parameter())
+    }
+
+    pub fn nix_string_literal(&self) -> String {
+        format!(
+            "\"{}\"",
+            self.flake_ref().replace('\\', "\\\\").replace('"', "\\\"")
+        )
+    }
+
+    pub fn nar_hash(&self) -> &NarHashSri {
+        &self.nar_hash
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NarHashSri(String);
 
 impl NarHashSri {
@@ -86,6 +107,23 @@ impl NarHashSri {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn as_url_parameter(&self) -> String {
+        self.0
+            .replace('=', "%3D")
+            .replace('+', "%2B")
+            .replace('/', "%2F")
+    }
+
+    pub fn short_code(&self) -> String {
+        self.0
+            .trim_start_matches("sha256-")
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .take(12)
+            .collect::<String>()
+            .to_ascii_lowercase()
     }
 }
 

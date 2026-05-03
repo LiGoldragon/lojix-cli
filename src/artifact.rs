@@ -6,9 +6,10 @@ use horizon_lib::species::System;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
 use crate::build::DeploymentShape;
-use crate::cluster::{FlakeRef, NarHashSri, OverrideUri};
+use crate::cluster::{FlakeInputRef, FlakeRef, NarHashSri};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
+use crate::publish::{ArchivePublisher, GeneratedInputArchive, GeneratedInputKind};
 
 const HORIZON_FLAKE_TEMPLATE: &str = "{\n\
 \x20 outputs = _: {\n\
@@ -67,10 +68,6 @@ impl HorizonDir {
         NarHashInput::from_directory(&self.0).calculate().await
     }
 
-    pub fn override_uri(&self) -> OverrideUri {
-        OverrideUri::from_local_path(&self.0)
-    }
-
     pub fn path(&self) -> &Path {
         &self.0
     }
@@ -101,10 +98,6 @@ impl SystemDir {
         NarHashInput::from_directory(&self.0).calculate().await
     }
 
-    pub fn override_uri(&self) -> OverrideUri {
-        OverrideUri::from_local_path(&self.0)
-    }
-
     pub fn path(&self) -> &Path {
         &self.0
     }
@@ -131,10 +124,6 @@ impl DeploymentDir {
         NarHashInput::from_directory(&self.0).calculate().await
     }
 
-    pub fn override_uri(&self) -> OverrideUri {
-        OverrideUri::from_local_path(&self.0)
-    }
-
     pub fn path(&self) -> &Path {
         &self.0
     }
@@ -150,7 +139,8 @@ pub struct HomeWrapperCacheKey<'key> {
 
 pub struct HomeWrapperSpec<'spec> {
     pub home: &'spec FlakeRef,
-    pub horizon: &'spec Horizon,
+    pub horizon_ref: &'spec FlakeInputRef,
+    pub system_ref: &'spec FlakeInputRef,
     pub user: &'spec UserName,
     pub system: System,
 }
@@ -175,23 +165,11 @@ impl HomeWrapperDir {
             Err(error) => return Err(error.into()),
         }
 
-        let horizon_dir = self.0.join("horizon");
-        std::fs::create_dir_all(&horizon_dir)?;
-        let json = serde_json::to_string_pretty(spec.horizon)?;
-        std::fs::write(horizon_dir.join("horizon.json"), json)?;
-        std::fs::write(horizon_dir.join("flake.nix"), HORIZON_FLAKE_TEMPLATE)?;
-
-        let system_dir = self.0.join("system");
-        std::fs::create_dir_all(&system_dir)?;
-        let mut system_flake = String::new();
-        system_flake.push_str(SYSTEM_FLAKE_TEMPLATE_PREFIX);
-        system_flake.push_str(NixSystemName::from_system(spec.system).as_str());
-        system_flake.push_str(SYSTEM_FLAKE_TEMPLATE_SUFFIX);
-        std::fs::write(system_dir.join("flake.nix"), system_flake)?;
-
         let system = NixSystemName::from_system(spec.system);
         let user = spec.user.as_str();
         let home = spec.home.nix_string_literal();
+        let horizon = spec.horizon_ref.nix_string_literal();
+        let target_system = spec.system_ref.nix_string_literal();
         let flake = format!(
             "{{\n\
              \x20 inputs = {{\n\
@@ -201,10 +179,10 @@ impl HomeWrapperDir {
              \x20   criomos-home.inputs.nixpkgs.follows = \"nixpkgs\";\n\
              \x20   criomos-lib.url = \"github:LiGoldragon/CriomOS-lib/main\";\n\
              \x20   criomos-home.inputs.criomos-lib.follows = \"criomos-lib\";\n\
-             \x20   system.url = \"path:./system\";\n\
+             \x20   system.url = {target_system};\n\
              \x20   pkgs.url = \"github:LiGoldragon/CriomOS-pkgs/main\";\n\
              \x20   pkgs.inputs.system.follows = \"system\";\n\
-             \x20   horizon.url = \"path:./horizon\";\n\
+             \x20   horizon.url = {horizon};\n\
              \x20 }};\n\
              \n\
              \x20 outputs = inputs:\n\
@@ -240,10 +218,6 @@ impl HomeWrapperDir {
 
     pub async fn nar_hash(&self) -> Result<NarHashSri> {
         NarHashInput::from_directory(&self.0).calculate().await
-    }
-
-    pub fn override_uri(&self) -> OverrideUri {
-        OverrideUri::from_local_path(&self.0)
     }
 
     pub fn path(&self) -> &Path {
@@ -284,10 +258,10 @@ pub struct MaterializedArtifact {
     pub system_nar_hash: NarHashSri,
     pub deployment_nar_hash: Option<NarHashSri>,
     pub home_wrapper_nar_hash: Option<NarHashSri>,
-    pub horizon_uri: OverrideUri,
-    pub system_uri: OverrideUri,
-    pub deployment_uri: Option<OverrideUri>,
-    pub home_wrapper_uri: Option<OverrideUri>,
+    pub horizon_ref: FlakeInputRef,
+    pub system_ref: FlakeInputRef,
+    pub deployment_ref: Option<FlakeInputRef>,
+    pub home_wrapper_ref: Option<FlakeInputRef>,
 }
 
 pub struct HorizonArtifact;
@@ -326,31 +300,51 @@ impl ArtifactMaterialization {
     }
 
     pub async fn materialize(&self) -> Result<MaterializedArtifact> {
+        let publisher = ArchivePublisher::from_environment()?;
+
         let horizon_dir = HorizonDir::try_create_cache(HorizonCacheKey {
             cluster: &self.cluster,
             node: &self.node,
         })?;
         horizon_dir.write(&self.horizon)?;
         let horizon_nar_hash = horizon_dir.nar_hash().await?;
-        let horizon_uri = horizon_dir.override_uri();
+        let horizon_ref = publisher
+            .publish(GeneratedInputArchive {
+                kind: GeneratedInputKind::Horizon,
+                directory: horizon_dir.path(),
+                nar_hash: &horizon_nar_hash,
+            })
+            .await?;
 
         let system_dir = SystemDir::try_create_cache(self.horizon.node.system)?;
         system_dir.write(self.horizon.node.system)?;
         let system_nar_hash = system_dir.nar_hash().await?;
-        let system_uri = system_dir.override_uri();
+        let system_ref = publisher
+            .publish(GeneratedInputArchive {
+                kind: GeneratedInputKind::System,
+                directory: system_dir.path(),
+                nar_hash: &system_nar_hash,
+            })
+            .await?;
 
-        let (deployment_dir, deployment_nar_hash, deployment_uri) = match self.deployment_shape {
+        let (deployment_dir, deployment_nar_hash, deployment_ref) = match self.deployment_shape {
             None => (None, None, None),
             Some(shape) => {
                 let dir = DeploymentDir::try_create_cache(shape)?;
                 dir.write(shape)?;
                 let nar_hash = dir.nar_hash().await?;
-                let uri = dir.override_uri();
-                (Some(dir), Some(nar_hash), Some(uri))
+                let input_ref = publisher
+                    .publish(GeneratedInputArchive {
+                        kind: GeneratedInputKind::Deployment,
+                        directory: dir.path(),
+                        nar_hash: &nar_hash,
+                    })
+                    .await?;
+                (Some(dir), Some(nar_hash), Some(input_ref))
             }
         };
 
-        let (home_wrapper_dir, home_wrapper_nar_hash, home_wrapper_uri) = match self.home.as_ref() {
+        let (home_wrapper_dir, home_wrapper_nar_hash, home_wrapper_ref) = match self.home.as_ref() {
             None => (None, None, None),
             Some(home) => {
                 let dir = HomeWrapperDir::try_create_cache(HomeWrapperCacheKey {
@@ -360,13 +354,20 @@ impl ArtifactMaterialization {
                 })?;
                 dir.write(HomeWrapperSpec {
                     home: &home.home,
-                    horizon: &self.horizon,
+                    horizon_ref: &horizon_ref,
+                    system_ref: &system_ref,
                     user: &home.user,
                     system: self.horizon.node.system,
                 })?;
                 let nar_hash = dir.nar_hash().await?;
-                let uri = dir.override_uri();
-                (Some(dir), Some(nar_hash), Some(uri))
+                let input_ref = publisher
+                    .publish(GeneratedInputArchive {
+                        kind: GeneratedInputKind::HomeWrapper,
+                        directory: dir.path(),
+                        nar_hash: &nar_hash,
+                    })
+                    .await?;
+                (Some(dir), Some(nar_hash), Some(input_ref))
             }
         };
 
@@ -379,10 +380,10 @@ impl ArtifactMaterialization {
             system_nar_hash,
             deployment_nar_hash,
             home_wrapper_nar_hash,
-            horizon_uri,
-            system_uri,
-            deployment_uri,
-            home_wrapper_uri,
+            horizon_ref,
+            system_ref,
+            deployment_ref,
+            home_wrapper_ref,
         })
     }
 }
