@@ -266,6 +266,14 @@ Validation rules:
 If `builder == node`, the closure copy phase is skipped because the build
 already happened on the activation target.
 
+Current third-party builder limitation: when `builder` names a node
+different from the deployment target, `lojix-cli` runs the closure copy
+from the dispatcher as `nix copy --from <builder> --to <target>`. Nix
+streams the NAR data through the dispatcher process; it is not a direct
+builder-to-target push. For large closures, run `lojix-cli` on the
+builder itself or build on the target until the copy phase moves onto the
+builder. See [report 0008](reports/0008-third-party-builder-copy-topology.md).
+
 SSH always uses key-based batch mode. The target address is derived
 from the projected node's Criome domain name as root SSH, not from a
 CLI target flag. Home activation switches to the requested user for the
