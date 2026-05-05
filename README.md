@@ -131,6 +131,8 @@ Examples:
 (FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)
 (OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Build prom)
 (HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS-home/main" Profile None)
+(FullOs goldragon zeus "./datom.nota" "github:LiGoldragon/CriomOS/main" Boot zeus [ prometheus ])
+(FullOs goldragon zeus "./datom.nota" "github:LiGoldragon/CriomOS/main" Boot None [ prometheus ])
 ```
 
 All deploy kinds validate a requested builder against the projected

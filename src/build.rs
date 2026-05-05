@@ -250,11 +250,11 @@ impl ExtraSubstituters {
         Self { entries }
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    fn urls_text(&self) -> String {
+    pub(crate) fn urls_text(&self) -> String {
         self.entries
             .iter()
             .map(|entry| entry.url.as_str())
@@ -262,7 +262,7 @@ impl ExtraSubstituters {
             .join(" ")
     }
 
-    fn public_keys_text(&self) -> String {
+    pub(crate) fn public_keys_text(&self) -> String {
         self.entries
             .iter()
             .map(|entry| entry.public_key.as_str())
