@@ -104,7 +104,7 @@ Fields:
 | `action` | System action for `FullOs` and `OsOnly`. |
 | `mode` | Home action for `HomeOnly`. |
 | `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
-| `substituters?` | Optional list of horizon node names whose Nix cache URLs should be injected into the build as `extra-substituters`. To specify substituters while leaving the builder unset, write `None [ prometheus ]`. |
+| `substituters?` | Optional list of horizon node names whose Nix cache endpoints should be injected into the build as `extra-substituters`. To specify substituters while leaving the builder unset, write `None [ prometheus ]`. |
 
 System actions:
 
@@ -272,7 +272,9 @@ already happened on the activation target.
 
 The optional substituters list is an operator-selected subset of cluster
 Nix cache nodes. Each name must resolve to a node with `nixUrl` and
-`nixPubKeyLine`; `lojix-cli` passes those values to Nix as
+`nixPubKeyLine`; when the node has a Yggdrasil address, `lojix-cli` uses
+that address for the injected cache URL so bootstraps do not depend on
+the target's current DNS state. The values are passed to Nix as
 `extra-substituters` and `extra-trusted-public-keys`, preserving the
 target's configured defaults such as `cache.nixos.org`.
 

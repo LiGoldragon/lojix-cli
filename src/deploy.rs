@@ -318,15 +318,36 @@ impl ExtraSubstitutersFromHorizon for ExtraSubstituters {
         let mut entries = Vec::new();
         for name in names {
             let node = HorizonNodeLookup::new(horizon, name).node()?;
-            let Some(url) = &node.nix_url else {
-                return Err(Error::InvalidSubstituter(name.clone()));
-            };
+            let url = CacheEndpoint::from_node(node)
+                .ok_or_else(|| Error::InvalidSubstituter(name.clone()))?;
             let Some(public_key) = &node.nix_pub_key_line else {
                 return Err(Error::InvalidSubstituter(name.clone()));
             };
-            entries.push(ExtraSubstituter::new(url.clone(), public_key.as_str()));
+            entries.push(ExtraSubstituter::new(url.url(), public_key.as_str()));
         }
         Ok(ExtraSubstituters::from_entries(entries))
+    }
+}
+
+struct CacheEndpoint<'node> {
+    node: &'node Node,
+}
+
+impl<'node> CacheEndpoint<'node> {
+    fn from_node(node: &'node Node) -> Option<Self> {
+        node.nix_url.as_ref()?;
+        Some(Self { node })
+    }
+
+    fn url(&self) -> String {
+        match &self.node.ygg_address {
+            Some(address) => format!("http://[{address}]"),
+            None => self
+                .node
+                .nix_url
+                .clone()
+                .expect("CacheEndpoint only exists when nix_url exists"),
+        }
     }
 }
 
