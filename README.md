@@ -261,7 +261,10 @@ Validation rules:
 
 - `builder == node` is allowed and means "build on the target".
 - A different builder must be present in projected `ex_nodes`.
-- The builder node must have `is_builder = true`.
+- When the builder is a different node from the target, that builder
+  must have `isRemoteNixBuilder = true`.
+- When `builder == node`, the build runs on the target over SSH and does
+  not require the target to expose the remote Nix builder service.
 
 If `builder == node`, the closure copy phase is skipped because the build
 already happened on the activation target.

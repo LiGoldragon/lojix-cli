@@ -40,7 +40,9 @@ pub enum Error {
     #[error("builder node {0} not found in horizon ex_nodes")]
     UnknownBuilder(NodeName),
 
-    #[error("builder {0} is not a valid builder in this horizon (is_builder=false or offline)")]
+    #[error(
+        "builder {0} is not a valid remote Nix builder in this horizon (isRemoteNixBuilder=false)"
+    )]
     InvalidBuilder(NodeName),
 
     #[error("user {user} not present in projected horizon users for {cluster}/{node}")]

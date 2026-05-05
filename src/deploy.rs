@@ -116,37 +116,26 @@ impl DeployState {
         // there is no `--target` flag.
         let target = SshTarget::from_node(&horizon.node);
 
-        // Resolve the requested builder (if supplied) against the projected
-        // ex-nodes. Validates `is_builder && online` *before* any
-        // nix invocation so an offline / non-builder name fails
-        // with a clear error rather than a TCP timeout deep into
-        // the build.
+        // Resolve the requested build host (if supplied) against the projected
+        // horizon. The viewpoint node is a local build on the deployment target,
+        // so it does not need to expose Nix's remote-builder service. A sibling
+        // build host must be a remote Nix builder because the dispatcher connects
+        // to it for the build phase.
         let builder_target = match &request.builder {
             None => None,
             Some(name) => {
-                // The builder resolves against the full horizon —
-                // including the viewpoint node, so builder
-                // prometheus with node prometheus is the legitimate
-                // "build on the target" case (offload from a thin
-                // dispatcher to a beefy target). The viewpoint
-                // sits in `horizon.node`; ex-nodes in
-                // `horizon.ex_nodes`.
-                let node = if *name == request.node {
-                    &horizon.node
+                if *name == request.node {
+                    Some(SshTarget::from_node(&horizon.node))
                 } else {
-                    horizon
+                    let node = horizon
                         .ex_nodes
                         .get(name)
-                        .ok_or_else(|| Error::UnknownBuilder(name.clone()))?
-                };
-                // `is_builder` projection gates on `online &&
-                // is_fully_trusted && size>=med && has base
-                // pubkeys`, so a single check covers all the
-                // disqualifications.
-                if !node.is_builder {
-                    return Err(Error::InvalidBuilder(name.clone()));
+                        .ok_or_else(|| Error::UnknownBuilder(name.clone()))?;
+                    if !node.is_remote_nix_builder {
+                        return Err(Error::InvalidBuilder(name.clone()));
+                    }
+                    Some(SshTarget::from_node(node))
                 }
-                Some(SshTarget::from_node(node))
             }
         };
 

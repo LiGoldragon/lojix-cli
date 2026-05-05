@@ -62,15 +62,15 @@ fn builder_equals_node_resolves_against_viewpoint_node() {
     if skip_if_no_datom() {
         return;
     }
-    // A request with node=prometheus and builder=prometheus is the
+    // A request with node=zeus and builder=zeus is the
     // "build on the target itself" case (per reports/0033 decision 4). The
     // viewpoint node sits in `horizon.node`, not `horizon.ex_nodes`,
     // so this must resolve there. We only run `eval` so no real
-    // ssh occurs — successful exit means resolution + projection
-    // both worked. prom is `is_builder=true` per goldragon's
-    // datom (LargeAiRouter, size=Max, trust=Max, base pubkeys).
+    // ssh occurs before validation. zeus is not a remote Nix builder
+    // because it is an edge node without the Nix pubkey needed for
+    // nix.sshServe, but target-side builds do not use nix.sshServe.
     let output = Command::new(env!("CARGO_BIN_EXE_lojix-cli"))
-        .args(eval_request_arguments("prometheus", "prometheus"))
+        .args(eval_request_arguments("zeus", "zeus"))
         .output()
         .expect("spawn lojix-cli");
 
@@ -85,8 +85,8 @@ fn builder_equals_node_resolves_against_viewpoint_node() {
         "must not raise UnknownBuilder when builder == node; got: {stderr}"
     );
     assert!(
-        !stderr.contains("not a valid builder"),
-        "prom must validate as is_builder=true; got: {stderr}"
+        !stderr.contains("not a valid remote Nix builder"),
+        "builder == node must not require isRemoteNixBuilder; got: {stderr}"
     );
 }
 
@@ -95,7 +95,7 @@ fn non_builder_node_fails_with_invalid_builder_error() {
     if skip_if_no_datom() {
         return;
     }
-    // balboa is in the cluster but is_builder=false (Center
+    // balboa is in the cluster but isRemoteNixBuilder=false (Center
     // species, Min size — fails the size>=med && is_fully_trusted
     // gates in horizon-rs's projection). Validation should reject
     // it specifically, not silently fall back.
@@ -111,7 +111,7 @@ fn non_builder_node_fails_with_invalid_builder_error() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("not a valid builder"),
+        stderr.contains("not a valid remote Nix builder"),
         "expected InvalidBuilder message, got stderr: {stderr}"
     );
     assert!(
