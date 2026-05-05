@@ -54,6 +54,7 @@ fn inline_nota_deploy_request_decodes_after_shell_token_join() {
             criomos: criomos_ref(),
             action: SystemAction::Boot,
             builder: None,
+            substituters: None,
         }),
     );
 }
@@ -79,6 +80,28 @@ fn file_path_nota_os_only_request_decodes() {
             criomos: criomos_ref(),
             action: SystemAction::Build,
             builder: Some(node_name("prometheus")),
+            substituters: None,
+        }),
+    );
+}
+
+#[test]
+fn system_request_decodes_named_substituters() {
+    let request = LojixRequest::from_nota(
+        "(FullOs goldragon zeus \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Switch zeus [ prometheus ])",
+    )
+    .unwrap();
+
+    assert_eq!(
+        request,
+        LojixRequest::FullOs(FullOs {
+            cluster: cluster_name(),
+            node: node_name("zeus"),
+            source: proposal_source(),
+            criomos: criomos_ref(),
+            action: SystemAction::Switch,
+            builder: Some(node_name("zeus")),
+            substituters: Some(vec![node_name("prometheus")]),
         }),
     );
 }
@@ -100,6 +123,7 @@ fn home_only_request_decodes_user_and_mode() {
             home: home_ref(),
             mode: HomeMode::Profile,
             builder: None,
+            substituters: None,
         }),
     );
 }
@@ -139,6 +163,7 @@ fn system_records_map_to_pipeline_plans() {
         criomos: criomos_ref(),
         action: SystemAction::Build,
         builder: Some(node_name("prometheus")),
+        substituters: Some(vec![node_name("prometheus")]),
     })
     .into_deploy_request();
 
@@ -146,6 +171,7 @@ fn system_records_map_to_pipeline_plans() {
     assert_eq!(os_only.cluster.as_str(), "goldragon");
     assert_eq!(os_only.node.as_str(), "tiger");
     assert_eq!(os_only.builder.as_ref().unwrap().as_str(), "prometheus");
+    assert_eq!(os_only.substituters[0].as_str(), "prometheus");
 
     let eval = LojixRequest::FullOs(FullOs {
         cluster: cluster_name(),
@@ -154,11 +180,13 @@ fn system_records_map_to_pipeline_plans() {
         criomos: criomos_ref(),
         action: SystemAction::Eval,
         builder: None,
+        substituters: None,
     })
     .into_deploy_request();
 
     assert_eq!(eval.plan, BuildPlan::full_os(SystemAction::Eval));
     assert!(eval.builder.is_none());
+    assert!(eval.substituters.is_empty());
 }
 
 #[test]
@@ -171,6 +199,7 @@ fn home_record_maps_to_home_plan() {
         home: home_ref(),
         mode: HomeMode::Activate,
         builder: None,
+        substituters: None,
     })
     .into_deploy_request();
 

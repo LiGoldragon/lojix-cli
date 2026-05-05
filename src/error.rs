@@ -45,6 +45,12 @@ pub enum Error {
     )]
     InvalidBuilder(NodeName),
 
+    #[error("substituter node {0} not found in horizon")]
+    UnknownSubstituter(NodeName),
+
+    #[error("substituter node {0} is not a Nix cache in this horizon")]
+    InvalidSubstituter(NodeName),
+
     #[error("user {user} not present in projected horizon users for {cluster}/{node}")]
     UnknownHomeUser {
         user: UserName,

@@ -17,6 +17,7 @@ pub struct FullOs {
     pub criomos: FlakeRef,
     pub action: SystemAction,
     pub builder: Option<NodeName>,
+    pub substituters: Option<Vec<NodeName>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
@@ -27,6 +28,7 @@ pub struct OsOnly {
     pub criomos: FlakeRef,
     pub action: SystemAction,
     pub builder: Option<NodeName>,
+    pub substituters: Option<Vec<NodeName>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
@@ -38,6 +40,7 @@ pub struct HomeOnly {
     pub home: FlakeRef,
     pub mode: HomeMode,
     pub builder: Option<NodeName>,
+    pub substituters: Option<Vec<NodeName>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +79,7 @@ impl FullOs {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
+            substituters: self.substituters.unwrap_or_default(),
             plan: BuildPlan::full_os(self.action),
             source: self.source,
             flake: self.criomos,
@@ -89,6 +93,7 @@ impl OsOnly {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
+            substituters: self.substituters.unwrap_or_default(),
             plan: BuildPlan::os_only(self.action),
             source: self.source,
             flake: self.criomos,
@@ -102,6 +107,7 @@ impl HomeOnly {
             cluster: self.cluster,
             node: self.node,
             builder: self.builder,
+            substituters: self.substituters.unwrap_or_default(),
             plan: BuildPlan::home_only(HomeBuildPlan {
                 user: self.user,
                 mode: self.mode,

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use horizon_lib::Viewpoint;
 use horizon_lib::name::{ClusterName, NodeName, UserName};
+use horizon_lib::node::Node;
 use horizon_lib::user::User;
+use horizon_lib::{Horizon, Viewpoint};
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
@@ -10,7 +11,10 @@ use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, System
 use crate::artifact::{
     ArtifactMaterialization, ArtifactMaterializationInput, ArtifactMsg, HorizonArtifact,
 };
-use crate::build::{BuildMsg, BuildPhaseOutcome, BuildPlan, HomeMode, NixBuild, NixBuilder};
+use crate::build::{
+    BuildMsg, BuildPhaseOutcome, BuildPlan, ExtraSubstituter, ExtraSubstituters, HomeMode,
+    NixBuild, NixBuilder,
+};
 use crate::cluster::{DerivationPath, FlakeRef, ProposalSource, StorePath};
 use crate::copy::{ClosureCopier, ClosureCopy, CopyMsg};
 use crate::error::{Error, Result};
@@ -29,6 +33,7 @@ pub struct DeployRequest {
     pub cluster: ClusterName,
     pub node: NodeName,
     pub builder: Option<NodeName>,
+    pub substituters: Vec<NodeName>,
     pub plan: BuildPlan,
     pub source: ProposalSource,
     pub flake: FlakeRef,
@@ -109,6 +114,8 @@ impl DeployState {
         .into_payload()??;
 
         request.validate_home_user(&horizon.users)?;
+        let extra_substituters =
+            ExtraSubstituters::from_horizon_nodes(&horizon, &request.substituters)?;
 
         // The viewpoint node — the deploy target — is always
         // `horizon.node`; addressing comes from its
@@ -189,6 +196,7 @@ impl DeployState {
                             horizon_ref: build_inputs.horizon_ref,
                             system_ref: build_inputs.system_ref,
                             deployment_ref: build_inputs.deployment_ref,
+                            extra_substituters,
                             plan: request.plan.clone(),
                             builder: builder_target.clone(),
                         },
@@ -298,6 +306,48 @@ impl DeployState {
                 Ok(DeployOutcome::Realized { store_path })
             }
         }
+    }
+}
+
+trait ExtraSubstitutersFromHorizon {
+    fn from_horizon_nodes(horizon: &Horizon, names: &[NodeName]) -> Result<ExtraSubstituters>;
+}
+
+impl ExtraSubstitutersFromHorizon for ExtraSubstituters {
+    fn from_horizon_nodes(horizon: &Horizon, names: &[NodeName]) -> Result<ExtraSubstituters> {
+        let mut entries = Vec::new();
+        for name in names {
+            let node = HorizonNodeLookup::new(horizon, name).node()?;
+            let Some(url) = &node.nix_url else {
+                return Err(Error::InvalidSubstituter(name.clone()));
+            };
+            let Some(public_key) = &node.nix_pub_key_line else {
+                return Err(Error::InvalidSubstituter(name.clone()));
+            };
+            entries.push(ExtraSubstituter::new(url.clone(), public_key.as_str()));
+        }
+        Ok(ExtraSubstituters::from_entries(entries))
+    }
+}
+
+struct HorizonNodeLookup<'horizon, 'name> {
+    horizon: &'horizon Horizon,
+    name: &'name NodeName,
+}
+
+impl<'horizon, 'name> HorizonNodeLookup<'horizon, 'name> {
+    fn new(horizon: &'horizon Horizon, name: &'name NodeName) -> Self {
+        Self { horizon, name }
+    }
+
+    fn node(&self) -> Result<&'horizon Node> {
+        if *self.name == self.horizon.node.name {
+            return Ok(&self.horizon.node);
+        }
+        self.horizon
+            .ex_nodes
+            .get(self.name)
+            .ok_or_else(|| Error::UnknownSubstituter(self.name.clone()))
     }
 }
 

@@ -231,8 +231,59 @@ pub struct NixBuild {
     pub horizon_ref: FlakeInputRef,
     pub system_ref: FlakeInputRef,
     pub deployment_ref: Option<FlakeInputRef>,
+    pub extra_substituters: ExtraSubstituters,
     pub plan: BuildPlan,
     pub builder: Option<SshTarget>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExtraSubstituters {
+    entries: Vec<ExtraSubstituter>,
+}
+
+impl ExtraSubstituters {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn from_entries(entries: Vec<ExtraSubstituter>) -> Self {
+        Self { entries }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn urls_text(&self) -> String {
+        self.entries
+            .iter()
+            .map(|entry| entry.url.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn public_keys_text(&self) -> String {
+        self.entries
+            .iter()
+            .map(|entry| entry.public_key.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtraSubstituter {
+    url: String,
+    public_key: String,
+}
+
+impl ExtraSubstituter {
+    pub fn new(url: impl Into<String>, public_key: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            public_key: public_key.into(),
+        }
+    }
 }
 
 impl NixBuild {
@@ -272,6 +323,16 @@ impl NixBuild {
                 "--override-input".to_string(),
                 "deployment".to_string(),
                 deployment_ref.flake_ref(),
+            ]);
+        }
+        if !self.extra_substituters.is_empty() {
+            invocation = invocation.with_arguments([
+                "--option".to_string(),
+                "extra-substituters".to_string(),
+                self.extra_substituters.urls_text(),
+                "--option".to_string(),
+                "extra-trusted-public-keys".to_string(),
+                self.extra_substituters.public_keys_text(),
             ]);
         }
         invocation

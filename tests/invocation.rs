@@ -9,7 +9,10 @@ use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName, UserName};
 use horizon_lib::species::System;
 
 use lojix_cli::activate::{BootEntry, HomeActivation, SystemActivation, SystemProfileLink};
-use lojix_cli::build::{BuildLocation, BuildPlan, HomeBuildPlan, HomeMode, NixBuild, SystemAction};
+use lojix_cli::build::{
+    BuildLocation, BuildPlan, ExtraSubstituter, ExtraSubstituters, HomeBuildPlan, HomeMode,
+    NixBuild, SystemAction,
+};
 use lojix_cli::cluster::{FlakeInputRef, FlakeRef, NarHashSri, StorePath};
 use lojix_cli::copy::ClosureCopy;
 use lojix_cli::host::SshTarget;
@@ -34,12 +37,30 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
             BuildPlan::System { .. } => Some(fixture_input_ref("/cache/deployment/home-on")),
             BuildPlan::Home { .. } => None,
         },
+        extra_substituters: ExtraSubstituters::empty(),
         plan,
         builder,
     };
     let invocation = build.nix_invocation();
     assert_eq!(invocation.program(), "nix");
     invocation.arguments().to_vec()
+}
+
+fn nix_build_arguments_with_substituters() -> Vec<String> {
+    let build = NixBuild {
+        flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
+        system: System::X86_64Linux,
+        horizon_ref: fixture_input_ref("/cache/horizon"),
+        system_ref: fixture_input_ref("/cache/system"),
+        deployment_ref: Some(fixture_input_ref("/cache/deployment/home-on")),
+        extra_substituters: ExtraSubstituters::from_entries(vec![ExtraSubstituter::new(
+            "http://nix.prometheus.goldragon.criome",
+            "prometheus.goldragon.criome:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        )]),
+        plan: BuildPlan::full_os(SystemAction::Switch),
+        builder: Some(target_for("zeus", "goldragon")),
+    };
+    build.nix_invocation().arguments().to_vec()
 }
 
 fn fixture_input_ref(path: &str) -> FlakeInputRef {
@@ -116,6 +137,27 @@ fn nix_home_build_arguments_use_home_activation_package_attr() {
     assert!(
         !arguments.iter().any(|argument| argument == "deployment"),
         "direct home evaluation must not receive CriomOS deployment override"
+    );
+}
+
+#[test]
+fn nix_build_arguments_include_extra_substituters_when_requested() {
+    let arguments = nix_build_arguments_with_substituters();
+    let substituters_index = arguments
+        .iter()
+        .position(|argument| argument == "extra-substituters")
+        .expect("extra-substituters option");
+    assert_eq!(
+        arguments[substituters_index + 1],
+        "http://nix.prometheus.goldragon.criome"
+    );
+    let keys_index = arguments
+        .iter()
+        .position(|argument| argument == "extra-trusted-public-keys")
+        .expect("extra-trusted-public-keys option");
+    assert_eq!(
+        arguments[keys_index + 1],
+        "prometheus.goldragon.criome:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     );
 }
 

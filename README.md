@@ -86,9 +86,9 @@ The top-level record head is the deploy kind. Fields are unnamed and
 positional.
 
 ```nota
-(FullOs cluster node source criomos action builder?)
-(OsOnly cluster node source criomos action builder?)
-(HomeOnly cluster node user source home mode builder?)
+(FullOs cluster node source criomos action builder? substituters?)
+(OsOnly cluster node source criomos action builder? substituters?)
+(HomeOnly cluster node user source home mode builder? substituters?)
 ```
 
 Fields:
@@ -104,6 +104,7 @@ Fields:
 | `action` | System action for `FullOs` and `OsOnly`. |
 | `mode` | Home action for `HomeOnly`. |
 | `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
+| `substituters?` | Optional list of horizon node names whose Nix cache URLs should be injected into the build as `extra-substituters`. To specify substituters while leaving the builder unset, write `None [ prometheus ]`. |
 
 System actions:
 
@@ -268,6 +269,12 @@ Validation rules:
 
 If `builder == node`, the closure copy phase is skipped because the build
 already happened on the activation target.
+
+The optional substituters list is an operator-selected subset of cluster
+Nix cache nodes. Each name must resolve to a node with `nixUrl` and
+`nixPubKeyLine`; `lojix-cli` passes those values to Nix as
+`extra-substituters` and `extra-trusted-public-keys`, preserving the
+target's configured defaults such as `cache.nixos.org`.
 
 Current third-party builder limitation: when `builder` names a node
 different from the deployment target, `lojix-cli` runs the closure copy
