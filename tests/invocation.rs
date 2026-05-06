@@ -254,6 +254,12 @@ fn closure_copy_dispatcher_to_target_uses_to_only() {
     assert_eq!(invocation.program(), "nix");
     let arguments = invocation.arguments();
     assert_eq!(arguments[0], "copy");
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument == "--substitute-on-destination"),
+        "--substitute-on-destination must be passed so the target prefers cluster-cache-signed paths over unsigned direct transfer",
+    );
     assert!(!arguments.iter().any(|argument| argument == "--from"));
     let target_index = arguments
         .iter()
@@ -277,6 +283,12 @@ fn closure_copy_third_party_builder_uses_from_and_to() {
     };
     let invocation = copy.invocation().expect("copy needed");
     let arguments = invocation.arguments();
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument == "--substitute-on-destination"),
+        "--substitute-on-destination must be passed so the target prefers cluster-cache-signed paths over unsigned direct transfer",
+    );
     let source_index = arguments
         .iter()
         .position(|argument| argument == "--from")

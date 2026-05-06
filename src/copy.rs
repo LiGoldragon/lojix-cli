@@ -17,6 +17,14 @@ use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 ///   ssh-ng://<b> --to ssh-ng://<target>`. The dispatcher's
 ///   nix-daemon orchestrates the NAR transfer through both ssh
 ///   tunnels.
+///
+/// `--substitute-on-destination` is always passed: the target
+/// first tries its own substituters (the cluster Nix cache) for
+/// each path, falling back to direct transfer from the source
+/// only when substitution misses. The cluster cache signs paths
+/// over HTTP, so substituted paths arrive verifiable; raw
+/// daemon-to-daemon transfer of locally-built paths arrives
+/// unsigned and would be rejected by `require-sigs = true`.
 pub struct ClosureCopy {
     pub store_path: StorePath,
     pub source: BuildLocation,
@@ -30,7 +38,10 @@ impl ClosureCopy {
         if self.source_matches_target() {
             return None;
         }
-        let mut arguments: Vec<String> = vec!["copy".to_string()];
+        let mut arguments: Vec<String> = vec![
+            "copy".to_string(),
+            "--substitute-on-destination".to_string(),
+        ];
         if let BuildLocation::Builder(builder) = &self.source {
             arguments.push("--from".to_string());
             arguments.push(builder.ssh_uri());
