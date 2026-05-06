@@ -30,12 +30,12 @@
           cargoVendorDir = craneLib.vendorCargoDeps {
             inherit src;
             outputHashes = {
-              "git+https://github.com/LiGoldragon/horizon-rs#c670d0cdf862bdff6ed0726b0e1ba2efdf55b7f9" =
-                "sha256-C0YiC48ZsAgmd9HzZnF4Rv2JxX+TILjkbD7nXkftVaY=";
-              "git+https://github.com/LiGoldragon/nota-codec.git#f9112ee308824014501742cf0670ccd1e0d56aff" =
-                "sha256-NSry8yxZkfN9n6kYdi3VnU8AAPsZtmxnnN8o/sLWksM=";
-              "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#d936e20bd4bb6b09999f5efac5f537f368598ed1" =
-                "sha256-/sM4CHMnoXg6QVZPeH/9E/h1wmfGBOliWEwoW9Rq0ik=";
+              "git+https://github.com/LiGoldragon/horizon-rs#fbd9a98ee7caba8504dbfb777b088242b78456f8" =
+                "sha256-9JyvGJ+5lR3gisSgeegC2rvYVC+RUWK8ZVc8W5juxu4=";
+              "git+https://github.com/LiGoldragon/nota-codec.git#85e21b4487bbd602f65f1b559029a24d9f5689f3" =
+                "sha256-5eVNhjCCYqT4FdlardQhkKaeroIOYPztvNXEKlr/4r4=";
+              "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#8684dacf9346c5523ab51d54fe742fe2608461f0" =
+                "sha256-z+sBGTUrPdkV64apZIoAquzudCzhw0lhmwCfwFPE0u0=";
             };
           };
           commonArgs = {
