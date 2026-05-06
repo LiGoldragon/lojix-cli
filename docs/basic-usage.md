@@ -1,8 +1,8 @@
 ---
-source: (our own — derived from /home/li/git/lojix-cli/{ARCHITECTURE,README}.md and field deploys 2026-04-27..28)
-fetched: 2026-04-28
-scope: how to use lojix-cli to build / deploy / inspect CriomOS systems; not the lojix-cli internals (those live in ARCHITECTURE.md)
+title: "Basic usage"
 ---
+
+> Last verified against field deploys: 2026-04-28
 
 # lojix-cli basic usage
 
