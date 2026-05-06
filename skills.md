@@ -49,21 +49,27 @@ is a type error.
 
 ---
 
-## Local builds are unsigned
+## Copy carries `--substitute-on-destination`
 
-When `builder = None`, the build runs on the dispatcher and
-`nix copy --to ssh-ng://<target>` carries the closure. If the
-dispatcher has no `nix.settings.secret-key-files` (the current
-CriomOS default — see CriomOS's `modules/nixos/nix.nix`), the
-closure has no transferable signature and the target rejects
-with "lacks a signature by a trusted key."
+`src/copy.rs` always passes `--substitute-on-destination` to
+`nix copy`. Effect: the target tries each path against its own
+substituters (the cluster HTTP cache) before accepting it from
+the source. The cluster cache (`nix-serve`) signs paths over
+HTTP; raw `ssh-ng` daemon-to-daemon transfer carries no
+signatures unless the source already has them.
 
-The full diagnosis and workarounds live in primary's
-`skills/system-specialist.md` under "Cluster Nix signing."
+**Consequence for deploy shape**: route builds through a cache
+node — `builder = <cache>` in the Nota request — so the cache
+has the closure to serve. `builder = None` only works if the
+dispatcher itself signs (it doesn't, in current CriomOS), so
+prefer `builder = prometheus` (or whichever node serves the
+cluster cache).
 
-The relevant code here is `src/copy.rs` — today plain `nix
-copy --to`, no `--no-check-sigs` or pre-sign step. Changing
-that is a deploy-shape change; do not patch it silently.
+The full diagnosis lives in primary's
+`skills/system-specialist.md` under "Cluster Nix signing,"
+including the key-generation procedure and the still-pending
+CriomOS module change to wire `nix.settings.secret-key-files`
+that would make `builder = None` work too.
 
 ---
 
