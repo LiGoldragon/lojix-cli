@@ -30,8 +30,8 @@
           cargoVendorDir = craneLib.vendorCargoDeps {
             inherit src;
             outputHashes = {
-              "git+https://github.com/LiGoldragon/horizon-rs#fbd9a98ee7caba8504dbfb777b088242b78456f8" =
-                "sha256-9JyvGJ+5lR3gisSgeegC2rvYVC+RUWK8ZVc8W5juxu4=";
+              "git+https://github.com/LiGoldragon/horizon-rs#1079367b706f3616489cf77d535f95c8d414f859" =
+                "sha256-2+nv37phS6bCFo+1M8bq/3ESHpr8+Y/lwyI+T8H+kqI=";
               "git+https://github.com/LiGoldragon/nota-codec.git#85e21b4487bbd602f65f1b559029a24d9f5689f3" =
                 "sha256-5eVNhjCCYqT4FdlardQhkKaeroIOYPztvNXEKlr/4r4=";
               "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#8684dacf9346c5523ab51d54fe742fe2608461f0" =
