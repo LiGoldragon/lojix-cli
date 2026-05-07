@@ -18,6 +18,9 @@ fn skip_if_no_datom() -> bool {
 }
 
 fn eval_request_arguments(node: &str, builder: &str) -> Vec<String> {
+    // FullOs schema: cluster node source criomos action builder substituters.
+    // Every Option must carry an explicit token under the all-fields-explicit
+    // rule — substituters: Option<Vec<NodeName>> reads as None here.
     vec![
         "(FullOs".to_string(),
         "goldragon".to_string(),
@@ -25,7 +28,8 @@ fn eval_request_arguments(node: &str, builder: &str) -> Vec<String> {
         format!("\"{GOLDRAGON_NOTA}\""),
         format!("\"{CRIOMOS_PATH}\""),
         "Eval".to_string(),
-        format!("{builder})"),
+        builder.to_string(),
+        "None)".to_string(),
     ]
 }
 

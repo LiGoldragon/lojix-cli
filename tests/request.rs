@@ -40,7 +40,9 @@ fn inline_nota_deploy_request_decodes_after_shell_token_join() {
         "tiger",
         "\"/tmp/datom.nota\"",
         "\"github:LiGoldragon/CriomOS/abc123\"",
-        "Boot)",
+        "Boot",
+        "None",
+        "None)",
     ]);
 
     let request = command_line.decode_request().unwrap();
@@ -64,7 +66,7 @@ fn file_path_nota_os_only_request_decodes() {
     let mut file = NamedTempFile::new().unwrap();
     write!(
         file,
-        "(OsOnly goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Build prometheus)"
+        "(OsOnly goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Build prometheus None)"
     )
     .unwrap();
 
@@ -109,7 +111,7 @@ fn system_request_decodes_named_substituters() {
 #[test]
 fn home_only_request_decodes_user_and_mode() {
     let request = LojixRequest::from_nota(
-        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS-home/main\" Profile)",
+        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS-home/main\" Profile None None)",
     )
     .unwrap();
 
@@ -144,7 +146,7 @@ fn extra_path_arguments_are_rejected() {
 #[test]
 fn nota_request_rejects_trailing_tokens() {
     let error = LojixRequest::from_nota(
-        "(FullOs goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Eval) trailing",
+        "(FullOs goldragon tiger \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS/abc123\" Eval None None) trailing",
     )
     .unwrap_err();
 
