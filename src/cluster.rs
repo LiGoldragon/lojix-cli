@@ -130,7 +130,7 @@ impl NarHashSri {
 /// A `/nix/store/...` path. Constructed from the stdout of `nix
 /// build --print-out-paths`; rejected if the prefix doesn't match
 /// (catches accidental whitespace, multi-line output, etc.).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorePath(String);
 
 impl StorePath {

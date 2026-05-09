@@ -64,7 +64,7 @@ impl ClosureCopy {
     fn source_matches_target(&self) -> bool {
         match &self.source {
             BuildLocation::Dispatcher => false,
-            BuildLocation::Builder(b) => b.as_ssh_arg() == self.target.as_ssh_arg(),
+            BuildLocation::Builder(builder) => builder == &self.target,
         }
     }
 }

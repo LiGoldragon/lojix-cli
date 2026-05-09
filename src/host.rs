@@ -3,48 +3,69 @@ use horizon_lib::node::Node;
 
 use crate::process::{ProcessInvocation, ShellCommand};
 
-/// `root@<node>.<cluster>.criome` — the addressing used by `ssh`,
-/// `nix copy --to ssh-ng://…`, and `--from ssh-ng://…`. Constructed
-/// from the projected horizon's `criome_domain_name`; never built
-/// from a literal hostname.
+/// SSH target — `<user>@<node>.<cluster>.criome` — the addressing
+/// used by `ssh`, `nix copy --to ssh-ng://…`, and
+/// `--from ssh-ng://…`. Built from the projected horizon's
+/// `criome_domain_name`; never from a literal hostname.
+///
+/// `user` and `domain` live as separate typed fields so
+/// `with_user` is a struct rebuild rather than a string parse.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SshTarget(String);
+pub struct SshTarget {
+    user: String,
+    domain: CriomeDomainName,
+}
 
 impl SshTarget {
     pub fn from_node(node: &Node) -> Self {
-        Self::from_criome_domain(&node.criome_domain_name)
+        Self::root_at(node.criome_domain_name.clone())
     }
 
     pub fn from_criome_domain(domain: &CriomeDomainName) -> Self {
-        Self(format!("root@{}", domain.as_str()))
+        Self::root_at(domain.clone())
     }
 
     pub fn from_user_at_domain(user: &UserName, domain: &CriomeDomainName) -> Self {
-        Self(format!("{}@{}", user.as_str(), domain.as_str()))
+        Self {
+            user: user.as_str().to_string(),
+            domain: domain.clone(),
+        }
+    }
+
+    fn root_at(domain: CriomeDomainName) -> Self {
+        Self {
+            user: "root".to_string(),
+            domain,
+        }
     }
 
     pub fn with_user(&self, user: &UserName) -> Self {
-        let domain = self
-            .0
-            .split_once('@')
-            .map_or(self.0.as_str(), |(_, domain)| domain);
-        Self(format!("{}@{}", user.as_str(), domain))
+        Self {
+            user: user.as_str().to_string(),
+            domain: self.domain.clone(),
+        }
     }
 
     pub fn ssh_uri(&self) -> String {
-        format!("ssh-ng://{}", self.0)
+        format!("ssh-ng://{}@{}", self.user, self.domain.as_str())
     }
 
-    pub fn as_ssh_arg(&self) -> &str {
-        &self.0
+    pub fn as_ssh_arg(&self) -> String {
+        format!("{}@{}", self.user, self.domain.as_str())
     }
 
     pub fn remote_invocation(&self, remote_command: ShellCommand) -> ProcessInvocation {
         ProcessInvocation::new("ssh").with_arguments([
             "-o".to_string(),
             "BatchMode=yes".to_string(),
-            self.as_ssh_arg().to_string(),
+            self.as_ssh_arg(),
             remote_command.as_str().to_string(),
         ])
+    }
+}
+
+impl std::fmt::Display for SshTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}@{}", self.user, self.domain.as_str())
     }
 }

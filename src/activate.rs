@@ -233,14 +233,13 @@ impl SystemActivation {
 
     async fn run_boot_once(&self) -> Result<()> {
         let unit_name = self.unit_name();
+        let target = &self.target;
         eprintln!(
-            "boot-once: dispatching as transient unit {unit_name}.service on {target}",
-            target = self.target.as_ssh_arg(),
+            "boot-once: dispatching as transient unit {unit_name}.service on {target}"
         );
         eprintln!(
             "boot-once: ssh holds open for live feedback; if it drops the unit \
-             keeps running — re-attach with: ssh {target} journalctl -u {unit_name}.service",
-            target = self.target.as_ssh_arg(),
+             keeps running — re-attach with: ssh {target} journalctl -u {unit_name}.service"
         );
         match self
             .systemd_run_invocation(&unit_name)
@@ -252,8 +251,7 @@ impl SystemActivation {
                 eprintln!(
                     "boot-once: ssh exited with error — the unit {unit_name}.service \
                      may still be running on {target}; re-check with: \
-                     ssh {target} systemctl status {unit_name}.service",
-                    target = self.target.as_ssh_arg(),
+                     ssh {target} systemctl status {unit_name}.service"
                 );
                 Err(error)
             }

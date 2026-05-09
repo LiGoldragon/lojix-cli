@@ -88,7 +88,7 @@ fn node_proposal(species: NodeSpecies, size: Magnitude, nix: bool, ygg: bool) ->
         wants_hw_video_accel: false,
         router_interfaces: None,
         online: None,
-        nb_of_build_cores: None,
+        number_of_build_cores: None,
     }
 }
 

@@ -148,7 +148,7 @@ impl RemoteInputDirectory {
             "-a".to_string(),
             "--delete".to_string(),
             format!("{}/", local_path.display()),
-            format!("{}:{}/", target.as_ssh_arg(), self.0.display()),
+            format!("{}:{}/", target, self.0.display()),
         ])
     }
 }
