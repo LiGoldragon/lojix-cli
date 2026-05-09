@@ -25,13 +25,11 @@
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           src = craneLib.cleanCargoSource ./.;
-          # Git-URL Cargo deps (horizon-lib, nota-codec, nota-derive)
-          # are fetched by crane from `Cargo.lock` metadata; their
-          # revs are bumped via
-          # `nix run nixpkgs#cargo -- update -p <crate>`. No
-          # outputHashes block — per
-          # `~/primary/skills/nix-discipline.md` "Never write a hash
-          # into flake.nix".
+          # No `cargoVendorDir.outputHashes` — per
+          # `~/primary/skills/nix-discipline.md` §"Cargo git deps
+          # in crane flakes". Crane fetches git deps from
+          # `Cargo.lock` alone; bump revs via
+          # `nix run nixpkgs#cargo -- update -p <crate>`.
           commonArgs = {
             inherit src;
             strictDeps = true;
