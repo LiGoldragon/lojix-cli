@@ -50,6 +50,28 @@ impl DeployRequest {
         }
         Ok(())
     }
+
+    /// Resolve the requested build host (if any) against the projected
+    /// horizon. The viewpoint node is a local build on the deployment
+    /// target, so it does not need to expose Nix's remote-builder
+    /// service. A sibling build host must be a remote Nix builder
+    /// because the dispatcher connects to it for the build phase.
+    fn resolve_builder_target(&self, horizon: &Horizon) -> Result<Option<SshTarget>> {
+        let Some(name) = &self.builder else {
+            return Ok(None);
+        };
+        if *name == self.node {
+            return Ok(Some(SshTarget::from_node(&horizon.node)));
+        }
+        let node = horizon
+            .ex_nodes
+            .get(name)
+            .ok_or_else(|| Error::UnknownBuilder(name.clone()))?;
+        if !node.is_remote_nix_builder {
+            return Err(Error::InvalidBuilder(name.clone()));
+        }
+        Ok(Some(SshTarget::from_node(node)))
+    }
 }
 
 #[derive(Debug)]
@@ -118,28 +140,7 @@ impl DeployState {
         // there is no `--target` flag.
         let target = SshTarget::from_node(&horizon.node);
 
-        // Resolve the requested build host (if supplied) against the projected
-        // horizon. The viewpoint node is a local build on the deployment target,
-        // so it does not need to expose Nix's remote-builder service. A sibling
-        // build host must be a remote Nix builder because the dispatcher connects
-        // to it for the build phase.
-        let builder_target = match &request.builder {
-            None => None,
-            Some(name) => {
-                if *name == request.node {
-                    Some(SshTarget::from_node(&horizon.node))
-                } else {
-                    let node = horizon
-                        .ex_nodes
-                        .get(name)
-                        .ok_or_else(|| Error::UnknownBuilder(name.clone()))?;
-                    if !node.is_remote_nix_builder {
-                        return Err(Error::InvalidBuilder(name.clone()));
-                    }
-                    Some(SshTarget::from_node(node))
-                }
-            }
-        };
+        let builder_target = request.resolve_builder_target(&horizon)?;
 
         let target_system = horizon.node.system;
         let materialized = ActorCallResult::from_result(

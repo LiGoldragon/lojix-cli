@@ -315,7 +315,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "horizon-lib"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/horizon-rs#95e615a5df9080984b616359f7e20f6e13cee5f4"
+source = "git+https://github.com/LiGoldragon/horizon-rs#4a17d4799f1adba959d842fd579f18516de026ec"
 dependencies = [
  "ipnet",
  "nota-codec",
