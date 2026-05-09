@@ -217,7 +217,7 @@ impl SystemActivation {
             .capture_stdout(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
             .await?;
         let link = SystemProfileLink::try_new(output.stdout().trim())?;
-        let entry = link.generation()?.boot_entry();
+        let entry = link.generation().boot_entry();
         self.step_set_efi_default_invocation(&entry)
             .inherit_stdio(ProcessRun::inherit_stderr(ProcessFailure::Ssh))
             .await?;
@@ -373,34 +373,31 @@ impl Activation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SystemProfileLink(String);
+pub struct SystemProfileLink {
+    text: String,
+    generation: SystemGeneration,
+}
 
 impl SystemProfileLink {
     pub fn try_new(link: impl Into<String>) -> Result<Self> {
-        let link = link.into();
-        let stripped = link
-            .strip_prefix("system-")
-            .and_then(|rest| rest.strip_suffix("-link"));
-        if stripped
-            .and_then(|number| number.parse::<u64>().ok())
-            .is_some()
-        {
-            Ok(Self(link))
-        } else {
-            Err(Error::InvalidSystemProfileLink { got: link })
-        }
-    }
-
-    pub fn generation(&self) -> Result<SystemGeneration> {
-        let number = self
-            .0
+        let text = link.into();
+        let number = text
             .strip_prefix("system-")
             .and_then(|rest| rest.strip_suffix("-link"))
             .and_then(|number| number.parse::<u64>().ok())
-            .ok_or_else(|| Error::InvalidSystemProfileLink {
-                got: self.0.clone(),
-            })?;
-        Ok(SystemGeneration(number))
+            .ok_or_else(|| Error::InvalidSystemProfileLink { got: text.clone() })?;
+        Ok(Self {
+            text,
+            generation: SystemGeneration::new(number),
+        })
+    }
+
+    pub fn generation(&self) -> SystemGeneration {
+        self.generation
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
     }
 }
 

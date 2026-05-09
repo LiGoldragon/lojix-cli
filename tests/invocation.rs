@@ -632,7 +632,6 @@ fn system_profile_link_extracts_generation_number() {
         SystemProfileLink::try_new("system-33-link")
             .unwrap()
             .generation()
-            .unwrap()
             .number(),
         33
     );
@@ -640,7 +639,6 @@ fn system_profile_link_extracts_generation_number() {
         SystemProfileLink::try_new("system-1-link")
             .unwrap()
             .generation()
-            .unwrap()
             .number(),
         1
     );
@@ -648,7 +646,6 @@ fn system_profile_link_extracts_generation_number() {
         SystemProfileLink::try_new("system-12345-link")
             .unwrap()
             .generation()
-            .unwrap()
             .number(),
         12345
     );

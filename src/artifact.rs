@@ -10,18 +10,12 @@ use crate::cluster::{FlakeInputRef, NarHashSri};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
-const HORIZON_FLAKE_TEMPLATE: &str = "{\n\
-\x20 outputs = _: {\n\
-\x20   horizon = builtins.fromJSON (builtins.readFile ./horizon.json);\n\
-\x20 };\n\
-}\n";
-
-const SYSTEM_FLAKE_TEMPLATE_PREFIX: &str = "{\n\
-\x20 outputs = _: {\n\
-\x20   system = \"";
-const SYSTEM_FLAKE_TEMPLATE_SUFFIX: &str = "\";\n\
-\x20 };\n\
-}\n";
+const HORIZON_FLAKE_TEMPLATE: &str = "{
+  outputs = _: {
+    horizon = builtins.fromJSON (builtins.readFile ./horizon.json);
+  };
+}
+";
 
 struct NixSystemName(&'static str);
 
@@ -33,7 +27,7 @@ impl NixSystemName {
         }
     }
 
-    fn as_str(&self) -> &str {
+    fn as_str(&self) -> &'static str {
         self.0
     }
 }
@@ -85,10 +79,15 @@ impl SystemDir {
     }
 
     pub fn write(&self, system: System) -> Result<()> {
-        let mut flake = String::new();
-        flake.push_str(SYSTEM_FLAKE_TEMPLATE_PREFIX);
-        flake.push_str(NixSystemName::from_system(system).as_str());
-        flake.push_str(SYSTEM_FLAKE_TEMPLATE_SUFFIX);
+        let name = NixSystemName::from_system(system).as_str();
+        let flake = format!(
+            "{{
+  outputs = _: {{
+    system = \"{name}\";
+  }};
+}}
+"
+        );
         std::fs::write(self.0.join("flake.nix"), flake)?;
         Ok(())
     }
@@ -173,20 +172,18 @@ pub struct ArtifactMaterialization {
     deployment_shape: Option<DeploymentShape>,
 }
 
-pub struct ArtifactMaterializationInput {
-    pub horizon: Horizon,
-    pub cluster: ClusterName,
-    pub node: NodeName,
-    pub deployment_shape: Option<DeploymentShape>,
-}
-
 impl ArtifactMaterialization {
-    pub fn from_input(input: ArtifactMaterializationInput) -> Self {
+    pub fn new(
+        horizon: Horizon,
+        cluster: ClusterName,
+        node: NodeName,
+        deployment_shape: Option<DeploymentShape>,
+    ) -> Self {
         Self {
-            horizon: input.horizon,
-            cluster: input.cluster,
-            node: input.node,
-            deployment_shape: input.deployment_shape,
+            horizon,
+            cluster,
+            node,
+            deployment_shape,
         }
     }
 

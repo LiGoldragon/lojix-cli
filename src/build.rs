@@ -170,10 +170,6 @@ impl BuildPlan {
         }
     }
 
-    pub fn supports_remote_builder(&self) -> bool {
-        true
-    }
-
     fn nix_operation(&self) -> NixOperation {
         match self {
             Self::System {
@@ -250,11 +246,11 @@ impl ExtraSubstituters {
         Self { entries }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    pub(crate) fn urls_text(&self) -> String {
+    pub fn urls_text(&self) -> String {
         self.entries
             .iter()
             .map(|entry| entry.url.as_str())
@@ -262,7 +258,7 @@ impl ExtraSubstituters {
             .join(" ")
     }
 
-    pub(crate) fn public_keys_text(&self) -> String {
+    pub fn public_keys_text(&self) -> String {
         self.entries
             .iter()
             .map(|entry| entry.public_key.as_str())

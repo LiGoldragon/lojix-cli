@@ -10,16 +10,11 @@ pub struct HorizonProjection {
     viewpoint: Viewpoint,
 }
 
-pub struct HorizonProjectionInput {
-    pub proposal: ClusterProposal,
-    pub viewpoint: Viewpoint,
-}
-
 impl HorizonProjection {
-    pub fn from_input(input: HorizonProjectionInput) -> Self {
+    pub fn new(proposal: ClusterProposal, viewpoint: Viewpoint) -> Self {
         Self {
-            proposal: input.proposal,
-            viewpoint: input.viewpoint,
+            proposal,
+            viewpoint,
         }
     }
 
