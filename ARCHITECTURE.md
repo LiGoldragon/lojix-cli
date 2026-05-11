@@ -5,6 +5,13 @@ projecting a cluster proposal through `horizon-rs`, materializing the
 small generated flake inputs needed for a deploy, and dispatching Nix build /
 activation work locally or through an SSH builder.
 
+> **Scope.** lojix-cli is explicitly transitional: deploy on today's
+> Nix-based stack while CriomOS is pre-duct-tape. The eventual `Criome`
+> is the universal computing paradigm in Sema; deploy folds into the
+> Sema substrate then and lojix-cli's separate role goes away. Today's
+> lojix-cli is built rightly for today's deploy needs, not as a draft
+> of the eventual. See `~/primary/ESSENCE.md` §"Today and eventually".
+
 ## Role
 
 This repo owns:
