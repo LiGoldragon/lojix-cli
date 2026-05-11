@@ -1,4 +1,6 @@
 /target/
+/result
+/result-*
 .dolt/
 *.db
 .beads-credential-key
