@@ -131,6 +131,24 @@ fn home_only_request_decodes_user_and_mode() {
 }
 
 #[test]
+fn check_host_key_material_request_decodes() {
+    let request =
+        LojixRequest::from_nota("(CheckHostKeyMaterial goldragon tiger \"/tmp/datom.nota\")")
+            .unwrap();
+
+    assert_eq!(
+        request,
+        LojixRequest::CheckHostKeyMaterial(
+            lojix_cli::check::CheckHostKeyMaterial {
+                cluster: cluster_name(),
+                node: node_name("tiger"),
+                source: proposal_source(),
+            }
+        ),
+    );
+}
+
+#[test]
 fn extra_path_arguments_are_rejected() {
     let command_line = CommandLine::from_arguments(["request.nota", "extra"]);
     let error = command_line.decode_request().unwrap_err();
@@ -158,7 +176,7 @@ fn nota_request_rejects_trailing_tokens() {
 
 #[test]
 fn system_records_map_to_pipeline_plans() {
-    let os_only = LojixRequest::OsOnly(OsOnly {
+    let os_only = OsOnly {
         cluster: cluster_name(),
         node: node_name("tiger"),
         source: proposal_source(),
@@ -166,7 +184,7 @@ fn system_records_map_to_pipeline_plans() {
         action: SystemAction::Build,
         builder: Some(node_name("prometheus")),
         substituters: Some(vec![node_name("prometheus")]),
-    })
+    }
     .into_deploy_request();
 
     assert_eq!(os_only.plan, BuildPlan::os_only(SystemAction::Build));
@@ -175,7 +193,7 @@ fn system_records_map_to_pipeline_plans() {
     assert_eq!(os_only.builder.as_ref().unwrap().as_str(), "prometheus");
     assert_eq!(os_only.substituters[0].as_str(), "prometheus");
 
-    let eval = LojixRequest::FullOs(FullOs {
+    let eval = FullOs {
         cluster: cluster_name(),
         node: node_name("tiger"),
         source: proposal_source(),
@@ -183,7 +201,7 @@ fn system_records_map_to_pipeline_plans() {
         action: SystemAction::Eval,
         builder: None,
         substituters: None,
-    })
+    }
     .into_deploy_request();
 
     assert_eq!(eval.plan, BuildPlan::full_os(SystemAction::Eval));
@@ -193,7 +211,7 @@ fn system_records_map_to_pipeline_plans() {
 
 #[test]
 fn home_record_maps_to_home_plan() {
-    let request = LojixRequest::HomeOnly(HomeOnly {
+    let request = HomeOnly {
         cluster: cluster_name(),
         node: node_name("tiger"),
         user: user_name("li"),
@@ -202,7 +220,7 @@ fn home_record_maps_to_home_plan() {
         mode: HomeMode::Activate,
         builder: None,
         substituters: None,
-    })
+    }
     .into_deploy_request();
 
     assert_eq!(

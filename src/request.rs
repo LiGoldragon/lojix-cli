@@ -5,6 +5,7 @@ use horizon_lib::name::{ClusterName, NodeName, UserName};
 use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
 
 use crate::build::{BuildPlan, HomeBuildPlan, HomeMode, SystemAction};
+use crate::check::CheckHostKeyMaterial;
 use crate::cluster::{FlakeRef, ProposalSource};
 use crate::deploy::DeployRequest;
 use crate::error::{Error, Result};
@@ -48,11 +49,12 @@ pub enum LojixRequest {
     FullOs(FullOs),
     OsOnly(OsOnly),
     HomeOnly(HomeOnly),
+    CheckHostKeyMaterial(CheckHostKeyMaterial),
 }
 
 impl LojixRequest {
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::nota(text);
+        let mut decoder = Decoder::new(text);
         let request = Self::decode(&mut decoder)?;
         if let Some(token) = decoder.peek_token()? {
             return Err(nota_codec::Error::UnexpectedToken {
@@ -62,14 +64,6 @@ impl LojixRequest {
             .into());
         }
         Ok(request)
-    }
-
-    pub fn into_deploy_request(self) -> DeployRequest {
-        match self {
-            Self::FullOs(request) => request.into_deploy_request(),
-            Self::OsOnly(request) => request.into_deploy_request(),
-            Self::HomeOnly(request) => request.into_deploy_request(),
-        }
     }
 }
 
@@ -124,6 +118,7 @@ impl NotaEncode for LojixRequest {
             Self::FullOs(request) => request.encode(encoder),
             Self::OsOnly(request) => request.encode(encoder),
             Self::HomeOnly(request) => request.encode(encoder),
+            Self::CheckHostKeyMaterial(request) => request.encode(encoder),
         }
     }
 }
@@ -135,6 +130,9 @@ impl NotaDecode for LojixRequest {
             "FullOs" => Ok(Self::FullOs(FullOs::decode(decoder)?)),
             "OsOnly" => Ok(Self::OsOnly(OsOnly::decode(decoder)?)),
             "HomeOnly" => Ok(Self::HomeOnly(HomeOnly::decode(decoder)?)),
+            "CheckHostKeyMaterial" => Ok(Self::CheckHostKeyMaterial(CheckHostKeyMaterial::decode(
+                decoder,
+            )?)),
             other => Err(nota_codec::Error::UnknownKindForVerb {
                 verb: "LojixRequest",
                 got: other.to_string(),

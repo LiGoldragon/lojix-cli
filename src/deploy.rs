@@ -152,9 +152,7 @@ impl DeployState {
                             request.cluster.clone(),
                             request.node.clone(),
                             match request.plan {
-                                BuildPlan::System { .. } => {
-                                    Some(request.plan.deployment_shape())
-                                }
+                                BuildPlan::System { .. } => Some(request.plan.deployment_shape()),
                                 BuildPlan::Home { .. } => None,
                             },
                         ),

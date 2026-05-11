@@ -1,6 +1,7 @@
 pub mod activate;
 pub mod artifact;
 pub mod build;
+pub mod check;
 pub mod cluster;
 pub mod copy;
 pub mod deploy;

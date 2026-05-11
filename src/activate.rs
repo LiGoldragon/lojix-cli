@@ -234,9 +234,7 @@ impl SystemActivation {
     async fn run_boot_once(&self) -> Result<()> {
         let unit_name = self.unit_name();
         let target = &self.target;
-        eprintln!(
-            "boot-once: dispatching as transient unit {unit_name}.service on {target}"
-        );
+        eprintln!("boot-once: dispatching as transient unit {unit_name}.service on {target}");
         eprintln!(
             "boot-once: ssh holds open for live feedback; if it drops the unit \
              keeps running — re-attach with: ssh {target} journalctl -u {unit_name}.service"

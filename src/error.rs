@@ -87,6 +87,9 @@ pub enum Error {
 
     #[error("actor messaging failed: {message}")]
     ActorMessagingFailed { message: String },
+
+    #[error("CheckHostKeyMaterial: {0}")]
+    CheckHostKeyMaterial(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -169,8 +169,7 @@ fn unknown_substituter_reports_unknown_substituter() {
 #[test]
 fn node_without_cache_endpoint_reports_invalid_substituter() {
     let horizon = projected_horizon();
-    let error =
-        ExtraSubstituters::from_horizon_nodes(&horizon, &[node_name("zeus")]).unwrap_err();
+    let error = ExtraSubstituters::from_horizon_nodes(&horizon, &[node_name("zeus")]).unwrap_err();
 
     assert!(
         matches!(error, Error::InvalidSubstituter(ref name) if name.as_str() == "zeus"),
@@ -187,8 +186,8 @@ fn cache_endpoint_without_public_key_reports_invalid_substituter() {
         .unwrap()
         .nix_pub_key_line = None;
 
-    let error = ExtraSubstituters::from_horizon_nodes(&horizon, &[node_name("prometheus")])
-        .unwrap_err();
+    let error =
+        ExtraSubstituters::from_horizon_nodes(&horizon, &[node_name("prometheus")]).unwrap_err();
 
     assert!(
         matches!(error, Error::InvalidSubstituter(ref name) if name.as_str() == "prometheus"),

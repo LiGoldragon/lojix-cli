@@ -19,7 +19,7 @@ impl ProposalSource {
 
     pub fn load(&self) -> Result<ClusterProposal> {
         let bytes = std::fs::read_to_string(&self.0)?;
-        let mut decoder = nota_codec::Decoder::nota(&bytes);
+        let mut decoder = nota_codec::Decoder::new(&bytes);
         Ok(<ClusterProposal as nota_codec::NotaDecode>::decode(
             &mut decoder,
         )?)

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 horizon-lib = { git = "https://github.com/LiGoldragon/horizon-rs" }
 nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git" }
+clavifaber  = { git = "https://github.com/LiGoldragon/clavifaber.git" }
 ractor      = "0.13"
 tokio       = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
 thiserror   = "2"
