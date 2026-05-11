@@ -19,9 +19,13 @@ runtime semantics are in `README.md`.
 
 The whole operator surface is a single Nota record decoded by
 `src/request.rs`. **No flags. No subcommands. No env-var
-dispatch. No custom argv parser.** The three top-level record
-heads (`FullOs`, `OsOnly`, `HomeOnly`) and their positional
-fields ARE the API.
+dispatch. No custom argv parser.** The top-level record heads
+(`FullOs`, `OsOnly`, `HomeOnly`, `CheckHostKeyMaterial`) and
+their positional fields ARE the API.
+
+The first three deploy; `CheckHostKeyMaterial` is a non-deploy
+read-only diff (see "Non-deploy verbs" below). `src/main.rs`
+branches on the variant.
 
 When adding a new deploy behavior:
 
@@ -34,6 +38,33 @@ When adding a new deploy behavior:
    consumes it.
 3. Document the schema change in `README.md` next to the
    existing field table.
+
+---
+
+## Non-deploy verbs
+
+Not every operator verb deploys. `CheckHostKeyMaterial`
+(in `src/check.rs`) is the first: an orchestrator-side
+read-only diff between horizon-rs's per-host projection and
+the host's on-disk `publication.nota` (which clavifaber writes
+during provisioning). It SSHes the host, cats the publication,
+parses it via `clavifaber::publication::PublicKeyPublication`,
+and prints per-key mismatches with operator hints.
+
+Why orchestrator-side, not host-side: the host's clavifaber
+stays cluster-unaware — it only knows its own keys, not what
+the cluster DB expects of it. Asking "does the host's material
+match the cluster?" only the orchestrator can answer. Per
+`reports/system-specialist/113.md`.
+
+Shape rules for non-deploy verbs:
+
+- Variant on `LojixRequest` with a `NotaRecord`-derived struct.
+- `src/main.rs` matches the variant and runs the right path.
+  Exit code 0 on clean diff, 3 on mismatches, 1 on error (so
+  `if lojix ... ; then` is a meaningful operator gate).
+- No mutation. If a verb would mutate the host, route it
+  through clavifaber's NOTA surface — don't grow a second.
 
 If the temptation is "this is a one-off, just take a flag," the
 answer is no — that one-off undoes the property the CLI was

@@ -22,6 +22,8 @@ This repo owns:
 - full-OS, OS-only, and direct home-only deploy flows
 - local and remote home profile / activation flows
 - SSH dispatch and closure-copy behavior for remote builders
+- orchestrator-side host-vs-cluster diagnostics
+  (`CheckHostKeyMaterial`, in [src/check.rs](src/check.rs))
 
 ## Boundaries
 
@@ -40,13 +42,17 @@ What does not live here:
 
 ## Current Code Map
 
-- [src/main.rs](src/main.rs): Nota/request-file entrypoint
+- [src/main.rs](src/main.rs): Nota/request-file entrypoint;
+  branches on `LojixRequest` variant (deploy vs check)
 - [src/deploy.rs](src/deploy.rs):
   coordinator; projection, artifact, build, copy, and activation flow
 - [src/build.rs](src/build.rs): typed build plans, target attr selection,
   deployment-shape selection, and remote-builder execution
 - [src/activate.rs](src/activate.rs):
   system activation plus local home profile / activation behavior
+- [src/check.rs](src/check.rs): `CheckHostKeyMaterial` — read-only
+  diff between horizon-expected per-host public material and the
+  host's on-disk `publication.nota` (written by clavifaber)
 - [tests/](tests): argv-shape and
   builder-validation tests that anchor the Nota-only CLI
 
