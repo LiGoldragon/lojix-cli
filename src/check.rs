@@ -124,7 +124,12 @@ impl Report {
     }
 }
 
-fn diff(horizon: &Horizon, publication: &PublicKeyPublication) -> Report {
+/// Compute the diff between horizon's per-host expectations and what
+/// the host's `publication.nota` actually declares. Pure: no I/O, no
+/// mutation. Exposed for integration tests (see
+/// `tests/check_host_key_material.rs`); the runtime caller is the
+/// `CheckHostKeyMaterial::run` async pipeline above.
+pub fn diff(horizon: &Horizon, publication: &PublicKeyPublication) -> Report {
     let mut mismatches = Vec::new();
 
     // ssh public key. horizon stores the base64 without the
