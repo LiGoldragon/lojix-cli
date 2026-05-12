@@ -1,5 +1,3 @@
-use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-
 use horizon_lib::name::UserName;
 use horizon_lib::species::System;
 
@@ -374,40 +372,3 @@ impl NixBuild {
     }
 }
 
-pub struct NixBuilder;
-
-pub enum BuildMsg {
-    Run {
-        build: NixBuild,
-        reply: RpcReplyPort<Result<BuildPhaseOutcome>>,
-    },
-}
-
-#[ractor::async_trait]
-impl Actor for NixBuilder {
-    type Msg = BuildMsg;
-    type State = ();
-    type Arguments = ();
-
-    async fn pre_start(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        _args: (),
-    ) -> std::result::Result<Self::State, ActorProcessingErr> {
-        Ok(())
-    }
-
-    async fn handle(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        msg: Self::Msg,
-        _state: &mut Self::State,
-    ) -> std::result::Result<(), ActorProcessingErr> {
-        match msg {
-            BuildMsg::Run { build, reply } => {
-                let _ = reply.send(build.run().await);
-            }
-        }
-        Ok(())
-    }
-}

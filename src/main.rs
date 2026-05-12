@@ -1,10 +1,7 @@
 use std::process::ExitCode;
-use std::time::Duration;
-
-use ractor::Actor;
 
 use lojix_cli::check::CheckHostKeyMaterial;
-use lojix_cli::deploy::{DeployCoordinator, DeployMsg};
+use lojix_cli::deploy::deploy;
 use lojix_cli::request::{CommandLine, LojixRequest};
 
 #[tokio::main]
@@ -37,30 +34,8 @@ async fn run_deploy(request: LojixRequest) -> ExitCode {
         }
     };
 
-    let (coordinator, handle) =
-        match Actor::spawn(Some("deploy".into()), DeployCoordinator, ()).await {
-            Ok(x) => x,
-            Err(e) => {
-                eprintln!("error: spawn coordinator: {e}");
-                return ExitCode::from(1);
-            }
-        };
-
-    let outcome = coordinator
-        .call(
-            |reply| DeployMsg::Run {
-                request: deploy_request,
-                reply,
-            },
-            Some(Duration::from_secs(3600)),
-        )
-        .await;
-
-    coordinator.stop(None);
-    let _ = handle.await;
-
-    match outcome {
-        Ok(ractor::rpc::CallResult::Success(Ok(outcome))) => {
+    match deploy(deploy_request).await {
+        Ok(outcome) => {
             let stdout = outcome.stdout_text();
             print!("{stdout}");
             if !stdout.ends_with('\n') {
@@ -68,16 +43,8 @@ async fn run_deploy(request: LojixRequest) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        Ok(ractor::rpc::CallResult::Success(Err(e))) => {
-            eprintln!("error: {e}");
-            ExitCode::from(1)
-        }
-        Ok(other) => {
-            eprintln!("error: rpc did not succeed: {other:?}");
-            ExitCode::from(1)
-        }
-        Err(e) => {
-            eprintln!("error: rpc: {e}");
+        Err(error) => {
+            eprintln!("error: {error}");
             ExitCode::from(1)
         }
     }

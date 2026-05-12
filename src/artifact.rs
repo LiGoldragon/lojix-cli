@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 use horizon_lib::Horizon;
 use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::species::System;
-use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-
 use crate::build::DeploymentShape;
 use crate::cluster::{FlakeInputRef, NarHashSri};
 use crate::error::{Error, Result};
@@ -163,8 +161,6 @@ pub struct MaterializedArtifact {
     pub deployment_ref: Option<FlakeInputRef>,
 }
 
-pub struct HorizonArtifact;
-
 pub struct ArtifactMaterialization {
     horizon: Horizon,
     cluster: ClusterName,
@@ -227,41 +223,3 @@ impl ArtifactMaterialization {
     }
 }
 
-pub enum ArtifactMsg {
-    Materialize {
-        materialization: ArtifactMaterialization,
-        reply: RpcReplyPort<Result<MaterializedArtifact>>,
-    },
-}
-
-#[ractor::async_trait]
-impl Actor for HorizonArtifact {
-    type Msg = ArtifactMsg;
-    type State = ();
-    type Arguments = ();
-
-    async fn pre_start(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        _args: (),
-    ) -> std::result::Result<Self::State, ActorProcessingErr> {
-        Ok(())
-    }
-
-    async fn handle(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        msg: Self::Msg,
-        _state: &mut Self::State,
-    ) -> std::result::Result<(), ActorProcessingErr> {
-        match msg {
-            ArtifactMsg::Materialize {
-                materialization,
-                reply,
-            } => {
-                let _ = reply.send(materialization.materialize().await);
-            }
-        }
-        Ok(())
-    }
-}

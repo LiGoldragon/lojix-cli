@@ -2,8 +2,6 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use horizon_lib::name::{NodeName, UserName};
-use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-
 use crate::build::{HomeMode, SystemAction};
 use crate::cluster::StorePath;
 use crate::error::{Error, Result};
@@ -424,43 +422,5 @@ impl BootEntry {
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-pub struct Activator;
-
-pub enum ActivateMsg {
-    Run {
-        activation: Activation,
-        reply: RpcReplyPort<Result<()>>,
-    },
-}
-
-#[ractor::async_trait]
-impl Actor for Activator {
-    type Msg = ActivateMsg;
-    type State = ();
-    type Arguments = ();
-
-    async fn pre_start(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        _args: (),
-    ) -> std::result::Result<Self::State, ActorProcessingErr> {
-        Ok(())
-    }
-
-    async fn handle(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        msg: Self::Msg,
-        _state: &mut Self::State,
-    ) -> std::result::Result<(), ActorProcessingErr> {
-        match msg {
-            ActivateMsg::Run { activation, reply } => {
-                let _ = reply.send(activation.run().await);
-            }
-        }
-        Ok(())
     }
 }

@@ -1,5 +1,3 @@
-use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-
 use crate::build::BuildLocation;
 use crate::cluster::StorePath;
 use crate::error::Result;
@@ -66,43 +64,5 @@ impl ClosureCopy {
             BuildLocation::Dispatcher => false,
             BuildLocation::Builder(builder) => builder == &self.target,
         }
-    }
-}
-
-pub struct ClosureCopier;
-
-pub enum CopyMsg {
-    Run {
-        copy: ClosureCopy,
-        reply: RpcReplyPort<Result<()>>,
-    },
-}
-
-#[ractor::async_trait]
-impl Actor for ClosureCopier {
-    type Msg = CopyMsg;
-    type State = ();
-    type Arguments = ();
-
-    async fn pre_start(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        _args: (),
-    ) -> std::result::Result<Self::State, ActorProcessingErr> {
-        Ok(())
-    }
-
-    async fn handle(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        msg: Self::Msg,
-        _state: &mut Self::State,
-    ) -> std::result::Result<(), ActorProcessingErr> {
-        match msg {
-            CopyMsg::Run { copy, reply } => {
-                let _ = reply.send(copy.run().await);
-            }
-        }
-        Ok(())
     }
 }

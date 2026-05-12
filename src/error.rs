@@ -79,15 +79,6 @@ pub enum Error {
     #[error("USER/LOGNAME env var not set")]
     NoUser,
 
-    #[error("ractor: {0}")]
-    Ractor(String),
-
-    #[error("actor rpc failed: {reason}")]
-    ActorRpcFailed { reason: &'static str },
-
-    #[error("actor messaging failed: {message}")]
-    ActorMessagingFailed { message: String },
-
     #[error("CheckHostKeyMaterial: {0}")]
     CheckHostKeyMaterial(String),
 }

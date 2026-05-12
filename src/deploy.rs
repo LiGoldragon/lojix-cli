@@ -4,28 +4,18 @@ use horizon_lib::name::{ClusterName, NodeName, UserName};
 use horizon_lib::node::Node;
 use horizon_lib::user::User;
 use horizon_lib::{Horizon, Viewpoint};
-use ractor::rpc::CallResult;
-use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 
-use crate::activate::{ActivateMsg, Activation, Activator, HomeActivation, SystemActivation};
-use crate::artifact::{ArtifactMaterialization, ArtifactMsg, HorizonArtifact};
+use crate::activate::{Activation, HomeActivation, SystemActivation};
+use crate::artifact::ArtifactMaterialization;
 use crate::build::{
-    BuildMsg, BuildPhaseOutcome, BuildPlan, ExtraSubstituter, ExtraSubstituters, HomeMode,
-    NixBuild, NixBuilder,
+    BuildPhaseOutcome, BuildPlan, ExtraSubstituter, ExtraSubstituters, HomeMode, NixBuild,
 };
 use crate::cluster::{DerivationPath, FlakeRef, ProposalSource, StorePath};
-use crate::copy::{ClosureCopier, ClosureCopy, CopyMsg};
+use crate::copy::ClosureCopy;
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
-use crate::project::{HorizonProjection, HorizonProjector, ProjectMsg};
-use crate::proposal::{ProposalMsg, ProposalReader};
+use crate::project::HorizonProjection;
 use crate::stage::{BuildInputReferences, RemoteInputStage};
-
-// No RPC timeout — `nix build` of a NixOS system from cold cache can
-// take hours (substituter fetch + tons of derivations). The right fix
-// for live progress is the streaming-output redesign tracked as
-// `lojix-auy`; for now an unbounded RPC just lets nix-daemon finish
-// in its own time. None below means no deadline on these calls.
 
 pub struct DeployRequest {
     pub cluster: ClusterName,
@@ -89,214 +79,128 @@ impl DeployOutcome {
     }
 }
 
-pub struct DeployState {
-    proposal_reader: ActorRef<ProposalMsg>,
-    projector: ActorRef<ProjectMsg>,
-    artifact: ActorRef<ArtifactMsg>,
-    builder: ActorRef<BuildMsg>,
-    copier: ActorRef<CopyMsg>,
-    activator: ActorRef<ActivateMsg>,
+/// Execute a deploy request end-to-end: load proposal, project horizon,
+/// materialize override flake inputs, run `nix`, then optionally copy
+/// the closure and activate it on the target.
+///
+/// The pipeline stages are direct method calls on data nouns — there is
+/// no actor framework. `nix build` of a NixOS system from cold cache can
+/// take hours; the awaits below have no timeout.
+pub async fn deploy(request: DeployRequest) -> Result<DeployOutcome> {
+    let proposal = request.source.load()?;
+
+    let viewpoint = Viewpoint {
+        cluster: request.cluster.clone(),
+        node: request.node.clone(),
+    };
+    let horizon = HorizonProjection::new(proposal, viewpoint).project()?;
+
+    request.validate_home_user(&horizon.users)?;
+    let extra_substituters =
+        ExtraSubstituters::from_horizon_nodes(&horizon, &request.substituters)?;
+
+    // The viewpoint node — the deploy target — is always
+    // `horizon.node`; addressing comes from its
+    // `criome_domain_name`. Per the network-neutrality rule there
+    // is no `--target` flag.
+    let target = SshTarget::from_node(&horizon.node);
+    let builder_target = request.resolve_builder_target(&horizon)?;
+    let target_system = horizon.node.system;
+
+    let deployment_shape = match request.plan {
+        BuildPlan::System { .. } => Some(request.plan.deployment_shape()),
+        BuildPlan::Home { .. } => None,
+    };
+    let materialized = ArtifactMaterialization::new(
+        horizon,
+        request.cluster.clone(),
+        request.node.clone(),
+        deployment_shape,
+    )
+    .materialize()
+    .await?;
+
+    let build_inputs = match &builder_target {
+        None => BuildInputReferences::from_local_artifact(&materialized),
+        Some(builder) => {
+            RemoteInputStage::from_artifact(builder.clone(), &materialized)
+                .run()
+                .await?
+        }
+    };
+
+    let outcome = NixBuild {
+        flake: request.flake.clone(),
+        system: target_system,
+        horizon_ref: build_inputs.horizon_ref,
+        system_ref: build_inputs.system_ref,
+        deployment_ref: build_inputs.deployment_ref,
+        extra_substituters,
+        plan: request.plan.clone(),
+        builder: builder_target.clone(),
+    }
+    .run()
+    .await?;
+
+    finish_deploy(request.plan, request.node, target, outcome).await
 }
 
-impl DeployState {
-    async fn run(&self, request: DeployRequest) -> Result<DeployOutcome> {
-        let proposal = ActorCallResult::from_result(
-            self.proposal_reader
-                .call(
-                    |reply| ProposalMsg::Read {
-                        source: request.source.clone(),
-                        reply,
-                    },
-                    None,
-                )
-                .await,
-        )
-        .into_payload()??;
-
-        let viewpoint = Viewpoint {
-            cluster: request.cluster.clone(),
-            node: request.node.clone(),
-        };
-        let horizon = ActorCallResult::from_result(
-            self.projector
-                .call(
-                    |reply| ProjectMsg::Project {
-                        projection: HorizonProjection::new(proposal, viewpoint),
-                        reply,
-                    },
-                    None,
-                )
-                .await,
-        )
-        .into_payload()??;
-
-        request.validate_home_user(&horizon.users)?;
-        let extra_substituters =
-            ExtraSubstituters::from_horizon_nodes(&horizon, &request.substituters)?;
-
-        // The viewpoint node — the deploy target — is always
-        // `horizon.node`; addressing comes from its
-        // `criome_domain_name`. Per the network-neutrality rule
-        // there is no `--target` flag.
-        let target = SshTarget::from_node(&horizon.node);
-
-        let builder_target = request.resolve_builder_target(&horizon)?;
-
-        let target_system = horizon.node.system;
-        let materialized = ActorCallResult::from_result(
-            self.artifact
-                .call(
-                    |reply| ArtifactMsg::Materialize {
-                        materialization: ArtifactMaterialization::new(
-                            horizon,
-                            request.cluster.clone(),
-                            request.node.clone(),
-                            match request.plan {
-                                BuildPlan::System { .. } => Some(request.plan.deployment_shape()),
-                                BuildPlan::Home { .. } => None,
-                            },
-                        ),
-                        reply,
-                    },
-                    None,
-                )
-                .await,
-        )
-        .into_payload()??;
-
-        let build_inputs = match &builder_target {
-            None => BuildInputReferences::from_local_artifact(&materialized),
-            Some(builder) => {
-                RemoteInputStage::from_artifact(builder.clone(), &materialized)
+async fn finish_deploy(
+    plan: BuildPlan,
+    node: NodeName,
+    target: SshTarget,
+    outcome: BuildPhaseOutcome,
+) -> Result<DeployOutcome> {
+    match outcome {
+        BuildPhaseOutcome::EvalDone { derivation_path } => {
+            Ok(DeployOutcome::Evaluated { derivation_path })
+        }
+        BuildPhaseOutcome::BuildDone {
+            store_path,
+            location,
+        } => {
+            match plan {
+                BuildPlan::System { action, .. } if action.activates() => {
+                    ClosureCopy {
+                        store_path: store_path.clone(),
+                        source: location,
+                        target: target.clone(),
+                    }
                     .run()
-                    .await?
-            }
-        };
-
-        let build_flake = match &request.plan {
-            BuildPlan::System { .. } => request.flake.clone(),
-            BuildPlan::Home { .. } => request.flake.clone(),
-        };
-
-        let outcome = ActorCallResult::from_result(
-            self.builder
-                .call(
-                    |reply| BuildMsg::Run {
-                        build: NixBuild {
-                            flake: build_flake,
-                            system: target_system,
-                            horizon_ref: build_inputs.horizon_ref,
-                            system_ref: build_inputs.system_ref,
-                            deployment_ref: build_inputs.deployment_ref,
-                            extra_substituters,
-                            plan: request.plan.clone(),
-                            builder: builder_target.clone(),
-                        },
-                        reply,
-                    },
-                    None,
-                )
-                .await,
-        )
-        .into_payload()??;
-
-        self.finish(FinishRequest {
-            plan: request.plan,
-            node: request.node.clone(),
-            target,
-            outcome,
-        })
-        .await
-    }
-
-    async fn finish(&self, request: FinishRequest) -> Result<DeployOutcome> {
-        match request.outcome {
-            BuildPhaseOutcome::EvalDone { derivation_path } => {
-                Ok(DeployOutcome::Evaluated { derivation_path })
-            }
-            BuildPhaseOutcome::BuildDone {
-                store_path,
-                location,
-            } => {
-                match request.plan {
-                    BuildPlan::System { action, .. } if action.activates() => {
-                        ActorCallResult::from_result(
-                            self.copier
-                                .call(
-                                    |reply| CopyMsg::Run {
-                                        copy: ClosureCopy {
-                                            store_path: store_path.clone(),
-                                            source: location,
-                                            target: request.target.clone(),
-                                        },
-                                        reply,
-                                    },
-                                    None,
-                                )
-                                .await,
-                        )
-                        .into_payload()??;
-                        ActorCallResult::from_result(
-                            self.activator
-                                .call(
-                                    |reply| ActivateMsg::Run {
-                                        activation: Activation::System(SystemActivation {
-                                            target: request.target,
-                                            store_path: store_path.clone(),
-                                            action,
-                                        }),
-                                        reply,
-                                    },
-                                    None,
-                                )
-                                .await,
-                        )
-                        .into_payload()??;
-                    }
-                    BuildPlan::System { .. } => {}
-                    BuildPlan::Home {
-                        mode: HomeMode::Build,
-                        ..
-                    } => {}
-                    BuildPlan::Home { user, mode } => {
-                        ActorCallResult::from_result(
-                            self.copier
-                                .call(
-                                    |reply| CopyMsg::Run {
-                                        copy: ClosureCopy {
-                                            store_path: store_path.clone(),
-                                            source: location,
-                                            target: request.target.clone(),
-                                        },
-                                        reply,
-                                    },
-                                    None,
-                                )
-                                .await,
-                        )
-                        .into_payload()??;
-                        ActorCallResult::from_result(
-                            self.activator
-                                .call(
-                                    |reply| ActivateMsg::Run {
-                                        activation: Activation::Home(HomeActivation {
-                                            node: request.node,
-                                            target: request.target,
-                                            user,
-                                            store_path: store_path.clone(),
-                                            mode,
-                                        }),
-                                        reply,
-                                    },
-                                    None,
-                                )
-                                .await,
-                        )
-                        .into_payload()??;
-                    }
+                    .await?;
+                    Activation::System(SystemActivation {
+                        target,
+                        store_path: store_path.clone(),
+                        action,
+                    })
+                    .run()
+                    .await?;
                 }
-                Ok(DeployOutcome::Realized { store_path })
+                BuildPlan::System { .. } => {}
+                BuildPlan::Home {
+                    mode: HomeMode::Build,
+                    ..
+                } => {}
+                BuildPlan::Home { user, mode } => {
+                    ClosureCopy {
+                        store_path: store_path.clone(),
+                        source: location,
+                        target: target.clone(),
+                    }
+                    .run()
+                    .await?;
+                    Activation::Home(HomeActivation {
+                        node,
+                        target,
+                        user,
+                        store_path: store_path.clone(),
+                        mode,
+                    })
+                    .run()
+                    .await?;
+                }
             }
+            Ok(DeployOutcome::Realized { store_path })
         }
     }
 }
@@ -357,111 +261,5 @@ impl<'horizon, 'name> HorizonNodeLookup<'horizon, 'name> {
             .ex_nodes
             .get(self.name)
             .ok_or_else(|| Error::UnknownSubstituter(self.name.clone()))
-    }
-}
-
-struct FinishRequest {
-    plan: BuildPlan,
-    node: NodeName,
-    target: SshTarget,
-    outcome: BuildPhaseOutcome,
-}
-
-struct ActorCallResult<T, E> {
-    result: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>,
-}
-
-impl<T, E> ActorCallResult<T, E>
-where
-    ractor::MessagingErr<E>: std::fmt::Display,
-{
-    fn from_result(result: std::result::Result<CallResult<T>, ractor::MessagingErr<E>>) -> Self {
-        Self { result }
-    }
-
-    fn into_payload(self) -> Result<T> {
-        match self.result {
-            Ok(CallResult::Success(payload)) => Ok(payload),
-            Ok(CallResult::Timeout) => Err(Error::ActorRpcFailed { reason: "timeout" }),
-            Ok(CallResult::SenderError) => Err(Error::ActorRpcFailed {
-                reason: "sender error",
-            }),
-            Err(error) => Err(Error::ActorMessagingFailed {
-                message: error.to_string(),
-            }),
-        }
-    }
-}
-
-pub struct DeployCoordinator;
-
-pub enum DeployMsg {
-    Run {
-        request: DeployRequest,
-        reply: RpcReplyPort<Result<DeployOutcome>>,
-    },
-}
-
-#[ractor::async_trait]
-impl Actor for DeployCoordinator {
-    type Msg = DeployMsg;
-    type State = DeployState;
-    type Arguments = ();
-
-    async fn pre_start(
-        &self,
-        myself: ActorRef<Self::Msg>,
-        _args: (),
-    ) -> std::result::Result<Self::State, ActorProcessingErr> {
-        let (proposal_reader, _) = Actor::spawn_linked(
-            Some("proposal".into()),
-            ProposalReader,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
-        let (projector, _) = Actor::spawn_linked(
-            Some("project".into()),
-            HorizonProjector,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
-        let (artifact, _) = Actor::spawn_linked(
-            Some("artifact".into()),
-            HorizonArtifact,
-            (),
-            myself.get_cell(),
-        )
-        .await?;
-        let (builder, _) =
-            Actor::spawn_linked(Some("build".into()), NixBuilder, (), myself.get_cell()).await?;
-        let (copier, _) =
-            Actor::spawn_linked(Some("copy".into()), ClosureCopier, (), myself.get_cell()).await?;
-        let (activator, _) =
-            Actor::spawn_linked(Some("activate".into()), Activator, (), myself.get_cell()).await?;
-        Ok(DeployState {
-            proposal_reader,
-            projector,
-            artifact,
-            builder,
-            copier,
-            activator,
-        })
-    }
-
-    async fn handle(
-        &self,
-        _myself: ActorRef<Self::Msg>,
-        msg: Self::Msg,
-        state: &mut Self::State,
-    ) -> std::result::Result<(), ActorProcessingErr> {
-        match msg {
-            DeployMsg::Run { request, reply } => {
-                let result = state.run(request).await;
-                let _ = reply.send(result);
-            }
-        }
-        Ok(())
     }
 }
