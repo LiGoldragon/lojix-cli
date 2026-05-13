@@ -16,7 +16,7 @@ use horizon_lib::machine::Machine;
 use horizon_lib::magnitude::Magnitude;
 use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::proposal::{
-    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, YggPubKeyEntry,
+    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, NodeServices, YggPubKeyEntry,
 };
 use horizon_lib::pub_key::{NixPubKey, SshPubKey, YggPubKey};
 use horizon_lib::species::{Arch, Bootloader, Keyboard, MachineSpecies, NodeSpecies};
@@ -89,6 +89,7 @@ fn node_proposal(species: NodeSpecies, size: Magnitude, nix: bool, ygg: bool) ->
         router_interfaces: None,
         online: None,
         number_of_build_cores: None,
+        services: NodeServices::default(),
     }
 }
 

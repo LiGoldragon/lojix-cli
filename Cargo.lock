@@ -487,7 +487,7 @@ dependencies = [
 [[package]]
 name = "horizon-lib"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/horizon-rs#7b43cf622d6de4366b75663dd1dda50a79b3ae89"
+source = "git+https://github.com/LiGoldragon/horizon-rs#c9ccd1ba81264c83496e0c129902e681bb94f156"
 dependencies = [
  "ipnet",
  "nota-codec",
@@ -649,7 +649,7 @@ dependencies = [
 [[package]]
 name = "nota-codec"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/nota-codec.git#6aed60d970f796a6920f8cdd011f128ca0939126"
+source = "git+https://github.com/LiGoldragon/nota-codec.git#2618adbfc140d856723a729c316203d006af8207"
 dependencies = [
  "nota-derive",
  "thiserror",

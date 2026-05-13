@@ -25,7 +25,9 @@ use horizon_lib::io::Io;
 use horizon_lib::machine::Machine;
 use horizon_lib::magnitude::Magnitude;
 use horizon_lib::name::{ClusterName, NodeName};
-use horizon_lib::proposal::{ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, YggPubKeyEntry};
+use horizon_lib::proposal::{
+    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, NodeServices, YggPubKeyEntry,
+};
 use horizon_lib::pub_key::{SshPubKey, YggPubKey};
 use horizon_lib::species::{Arch, Bootloader, Keyboard, MachineSpecies, NodeSpecies};
 use horizon_lib::{Horizon, Viewpoint};
@@ -62,10 +64,7 @@ fn io() -> Io {
     }
 }
 
-fn node_proposal_with_keys(
-    ssh: &str,
-    yggdrasil: Option<YggPubKeyEntry>,
-) -> NodeProposal {
+fn node_proposal_with_keys(ssh: &str, yggdrasil: Option<YggPubKeyEntry>) -> NodeProposal {
     NodeProposal {
         species: NodeSpecies::Edge,
         size: Magnitude::Min,
@@ -88,6 +87,7 @@ fn node_proposal_with_keys(
         router_interfaces: None,
         online: None,
         number_of_build_cores: None,
+        services: NodeServices::default(),
     }
 }
 
@@ -118,10 +118,7 @@ fn ssh_line(ssh_base64: &str) -> String {
     format!("ssh-ed25519 {ssh_base64} dune@fieldlab")
 }
 
-fn publication(
-    ssh_base64: &str,
-    yggdrasil: Option<YggdrasilProjection>,
-) -> PublicKeyPublication {
+fn publication(ssh_base64: &str, yggdrasil: Option<YggdrasilProjection>) -> PublicKeyPublication {
     PublicKeyPublication {
         node_name: "dune".to_string(),
         open_ssh_public_key: ssh_line(ssh_base64),
@@ -175,7 +172,9 @@ fn mismatch_when_horizon_expects_yggdrasil_but_publication_has_none() {
     let report = diff(&horizon, &pub_);
     assert_eq!(report.mismatches.len(), 1);
     assert_eq!(report.mismatches[0].concern, "yggdrasil-public-key");
-    assert!(report.mismatches[0].actual.contains("absent in publication"));
+    assert!(report.mismatches[0]
+        .actual
+        .contains("absent in publication"));
 }
 
 #[test]
@@ -185,7 +184,9 @@ fn mismatch_when_publication_has_yggdrasil_not_in_horizon() {
     let report = diff(&horizon, &pub_);
     assert_eq!(report.mismatches.len(), 1);
     assert_eq!(report.mismatches[0].concern, "yggdrasil-public-key");
-    assert!(report.mismatches[0].expected.contains("absent in goldragon"));
+    assert!(report.mismatches[0]
+        .expected
+        .contains("absent in goldragon"));
 }
 
 #[test]
