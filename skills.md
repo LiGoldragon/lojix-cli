@@ -54,8 +54,7 @@ and prints per-key mismatches with operator hints.
 Why orchestrator-side, not host-side: the host's clavifaber
 stays cluster-unaware — it only knows its own keys, not what
 the cluster DB expects of it. Asking "does the host's material
-match the cluster?" only the orchestrator can answer. Per
-`reports/system-specialist/113.md`.
+match the cluster?" only the orchestrator can answer.
 
 Shape rules for non-deploy verbs:
 
