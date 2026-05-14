@@ -4,13 +4,23 @@ use horizon_lib::Horizon;
 use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::species::System;
 use crate::build::DeploymentShape;
-use crate::cluster::{FlakeInputRef, NarHashSri};
+use crate::cluster::{FlakeInputRef, NarHashSri, ProposalSource};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
 const HORIZON_FLAKE_TEMPLATE: &str = "{
   outputs = _: {
     horizon = builtins.fromJSON (builtins.readFile ./horizon.json);
+  };
+}
+";
+
+const ROUTER_WIFI_SAE_PASSWORDS_FILE: &str = "router-wifi-sae-passwords.sops";
+const SECRETS_FLAKE_TEMPLATE: &str = "{
+  outputs = _: {
+    sopsFiles = {
+      routerWifiSaePasswords = ./router-wifi-sae-passwords.sops;
+    };
   };
 }
 ";
@@ -125,6 +135,55 @@ impl DeploymentDir {
     }
 }
 
+pub struct SecretsDir(PathBuf);
+
+impl SecretsDir {
+    pub fn try_create_cache(key: HorizonCacheKey<'_>) -> Result<Self> {
+        let home = std::env::var("HOME").map_err(|_| Error::NoHome)?;
+        let dir = PathBuf::from(home)
+            .join(".cache/lojix/secrets")
+            .join(key.cluster.as_str())
+            .join(key.node.as_str());
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self(dir))
+    }
+
+    fn write(&self, source: &ClusterSecrets) -> Result<()> {
+        std::fs::copy(
+            source.router_wifi_sae_passwords_file(),
+            self.0.join(ROUTER_WIFI_SAE_PASSWORDS_FILE),
+        )?;
+        std::fs::write(self.0.join("flake.nix"), SECRETS_FLAKE_TEMPLATE)?;
+        Ok(())
+    }
+
+    pub async fn nar_hash(&self) -> Result<NarHashSri> {
+        NarHashInput::from_directory(&self.0).calculate().await
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+struct ClusterSecrets {
+    root: PathBuf,
+}
+
+impl ClusterSecrets {
+    fn from_proposal_source(source: &ProposalSource) -> Option<Self> {
+        let root = source.as_path().parent().unwrap_or_else(|| Path::new("."));
+        let candidate = root.join("secrets").join(ROUTER_WIFI_SAE_PASSWORDS_FILE);
+        candidate.exists().then_some(Self { root: root.into() })
+    }
+
+    fn router_wifi_sae_passwords_file(&self) -> PathBuf {
+        self.root
+            .join("secrets")
+            .join(ROUTER_WIFI_SAE_PASSWORDS_FILE)
+    }
+}
+
 struct NarHashInput<'directory> {
     directory: &'directory Path,
 }
@@ -153,18 +212,22 @@ pub struct MaterializedArtifact {
     pub horizon_dir: HorizonDir,
     pub system_dir: SystemDir,
     pub deployment_dir: Option<DeploymentDir>,
+    pub secrets_dir: Option<SecretsDir>,
     pub horizon_nar_hash: NarHashSri,
     pub system_nar_hash: NarHashSri,
     pub deployment_nar_hash: Option<NarHashSri>,
+    pub secrets_nar_hash: Option<NarHashSri>,
     pub horizon_ref: FlakeInputRef,
     pub system_ref: FlakeInputRef,
     pub deployment_ref: Option<FlakeInputRef>,
+    pub secrets_ref: Option<FlakeInputRef>,
 }
 
 pub struct ArtifactMaterialization {
     horizon: Horizon,
     cluster: ClusterName,
     node: NodeName,
+    proposal_source: ProposalSource,
     deployment_shape: Option<DeploymentShape>,
 }
 
@@ -173,12 +236,14 @@ impl ArtifactMaterialization {
         horizon: Horizon,
         cluster: ClusterName,
         node: NodeName,
+        proposal_source: ProposalSource,
         deployment_shape: Option<DeploymentShape>,
     ) -> Self {
         Self {
             horizon,
             cluster,
             node,
+            proposal_source,
             deployment_shape,
         }
     }
@@ -209,17 +274,34 @@ impl ArtifactMaterialization {
             }
         };
 
+        let (secrets_dir, secrets_nar_hash, secrets_ref) =
+            match ClusterSecrets::from_proposal_source(&self.proposal_source) {
+                None => (None, None, None),
+                Some(source) => {
+                    let dir = SecretsDir::try_create_cache(HorizonCacheKey {
+                        cluster: &self.cluster,
+                        node: &self.node,
+                    })?;
+                    dir.write(&source)?;
+                    let nar_hash = dir.nar_hash().await?;
+                    let input_ref = FlakeInputRef::from_local_path(dir.path(), nar_hash.clone());
+                    (Some(dir), Some(nar_hash), Some(input_ref))
+                }
+            };
+
         Ok(MaterializedArtifact {
             horizon_dir,
             system_dir,
             deployment_dir,
+            secrets_dir,
             horizon_nar_hash,
             system_nar_hash,
             deployment_nar_hash,
+            secrets_nar_hash,
             horizon_ref,
             system_ref,
             deployment_ref,
+            secrets_ref,
         })
     }
 }
-

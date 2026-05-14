@@ -37,6 +37,7 @@ fn nix_build_arguments_for(plan: BuildPlan, builder: Option<SshTarget>) -> Vec<S
             BuildPlan::System { .. } => Some(fixture_input_ref("/cache/deployment/home-on")),
             BuildPlan::Home { .. } => None,
         },
+        secrets_ref: None,
         extra_substituters: ExtraSubstituters::empty(),
         plan,
         builder,
@@ -53,12 +54,28 @@ fn nix_build_arguments_with_substituters() -> Vec<String> {
         horizon_ref: fixture_input_ref("/cache/horizon"),
         system_ref: fixture_input_ref("/cache/system"),
         deployment_ref: Some(fixture_input_ref("/cache/deployment/home-on")),
+        secrets_ref: None,
         extra_substituters: ExtraSubstituters::from_entries(vec![ExtraSubstituter::new(
             "http://nix.prometheus.goldragon.criome",
             "prometheus.goldragon.criome:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         )]),
         plan: BuildPlan::full_os(SystemAction::Switch),
         builder: Some(target_for("zeus", "goldragon")),
+    };
+    build.nix_invocation().arguments().to_vec()
+}
+
+fn nix_build_arguments_with_secrets() -> Vec<String> {
+    let build = NixBuild {
+        flake: FlakeRef::new("github:LiGoldragon/CriomOS/abc123"),
+        system: System::X86_64Linux,
+        horizon_ref: fixture_input_ref("/cache/horizon"),
+        system_ref: fixture_input_ref("/cache/system"),
+        deployment_ref: Some(fixture_input_ref("/cache/deployment/home-on")),
+        secrets_ref: Some(fixture_input_ref("/cache/secrets")),
+        extra_substituters: ExtraSubstituters::empty(),
+        plan: BuildPlan::full_os(SystemAction::Switch),
+        builder: None,
     };
     build.nix_invocation().arguments().to_vec()
 }
@@ -103,6 +120,19 @@ fn nix_build_arguments_contain_target_attr_and_overrides() {
     assert_eq!(
         arguments[deployment_index + 1],
         "path:/cache/deployment/home-on?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
+    );
+}
+
+#[test]
+fn nix_build_arguments_include_secrets_override_when_present() {
+    let arguments = nix_build_arguments_with_secrets();
+    let secrets_index = arguments
+        .iter()
+        .position(|argument| argument == "secrets")
+        .expect("secrets override");
+    assert_eq!(
+        arguments[secrets_index + 1],
+        "path:/cache/secrets?narHash=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D"
     );
 }
 
@@ -219,6 +249,60 @@ fn remote_input_stage_rsyncs_generated_inputs_and_rewrites_refs() {
         format!("path:{root}/system?narHash=sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB%3D")
     );
     assert!(plan.references().deployment_ref.is_none());
+    assert!(plan.references().secrets_ref.is_none());
+}
+
+#[test]
+fn remote_input_stage_can_ship_generated_secrets() {
+    let target = target_for("prometheus", "goldragon");
+    let stage = RemoteInputStage::new(
+        target,
+        vec![
+            GeneratedInput::new(
+                GeneratedInputName::Horizon,
+                "/cache/horizon".into(),
+                fixture_nar_hash('A'),
+            ),
+            GeneratedInput::new(
+                GeneratedInputName::System,
+                "/cache/system".into(),
+                fixture_nar_hash('B'),
+            ),
+            GeneratedInput::new(
+                GeneratedInputName::Secrets,
+                "/cache/secrets".into(),
+                fixture_nar_hash('C'),
+            ),
+        ],
+    );
+
+    let plan = stage.plan();
+    let root = "/var/tmp/lojix/generated-inputs/horizon-aaaaaaaaaaaa_system-bbbbbbbbbbbb_secrets-cccccccccccc";
+
+    assert_eq!(plan.commands().len(), 6);
+    assert_eq!(
+        plan.commands()[4].invocation().arguments()[3],
+        format!("mkdir -p {root}/secrets")
+    );
+    assert_eq!(
+        plan.commands()[5].invocation().arguments(),
+        [
+            "-a",
+            "--delete",
+            "/cache/secrets/",
+            &format!("root@prometheus.goldragon.criome:{root}/secrets/")
+        ]
+    );
+    assert_eq!(
+        plan.references()
+            .secrets_ref
+            .as_ref()
+            .expect("secrets ref")
+            .flake_ref(),
+        format!(
+            "path:{root}/secrets?narHash=sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC%3D"
+        )
+    );
 }
 
 #[test]

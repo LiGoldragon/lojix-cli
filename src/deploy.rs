@@ -115,6 +115,7 @@ pub async fn deploy(request: DeployRequest) -> Result<DeployOutcome> {
         horizon,
         request.cluster.clone(),
         request.node.clone(),
+        request.source.clone(),
         deployment_shape,
     )
     .materialize()
@@ -135,6 +136,7 @@ pub async fn deploy(request: DeployRequest) -> Result<DeployOutcome> {
         horizon_ref: build_inputs.horizon_ref,
         system_ref: build_inputs.system_ref,
         deployment_ref: build_inputs.deployment_ref,
+        secrets_ref: build_inputs.secrets_ref,
         extra_substituters,
         plan: request.plan.clone(),
         builder: builder_target.clone(),

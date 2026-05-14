@@ -225,6 +225,7 @@ pub struct NixBuild {
     pub horizon_ref: FlakeInputRef,
     pub system_ref: FlakeInputRef,
     pub deployment_ref: Option<FlakeInputRef>,
+    pub secrets_ref: Option<FlakeInputRef>,
     pub extra_substituters: ExtraSubstituters,
     pub plan: BuildPlan,
     pub builder: Option<SshTarget>,
@@ -319,6 +320,13 @@ impl NixBuild {
                 deployment_ref.flake_ref(),
             ]);
         }
+        if let Some(secrets_ref) = &self.secrets_ref {
+            invocation = invocation.with_arguments([
+                "--override-input".to_string(),
+                "secrets".to_string(),
+                secrets_ref.flake_ref(),
+            ]);
+        }
         if !self.extra_substituters.is_empty() {
             invocation = invocation.with_arguments([
                 "--option".to_string(),
@@ -371,4 +379,3 @@ impl NixBuild {
         }
     }
 }
-

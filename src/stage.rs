@@ -11,6 +11,7 @@ pub struct BuildInputReferences {
     pub horizon_ref: FlakeInputRef,
     pub system_ref: FlakeInputRef,
     pub deployment_ref: Option<FlakeInputRef>,
+    pub secrets_ref: Option<FlakeInputRef>,
 }
 
 impl BuildInputReferences {
@@ -19,6 +20,7 @@ impl BuildInputReferences {
             horizon_ref: artifact.horizon_ref.clone(),
             system_ref: artifact.system_ref.clone(),
             deployment_ref: artifact.deployment_ref.clone(),
+            secrets_ref: artifact.secrets_ref.clone(),
         }
     }
 }
@@ -28,6 +30,7 @@ pub enum GeneratedInputName {
     Horizon,
     System,
     Deployment,
+    Secrets,
 }
 
 impl GeneratedInputName {
@@ -36,6 +39,7 @@ impl GeneratedInputName {
             Self::Horizon => "horizon",
             Self::System => "system",
             Self::Deployment => "deployment",
+            Self::Secrets => "secrets",
         }
     }
 }
@@ -74,6 +78,15 @@ impl GeneratedInput {
         {
             inputs.push(Self::new(
                 GeneratedInputName::Deployment,
+                directory.path().to_path_buf(),
+                nar_hash.clone(),
+            ));
+        }
+        if let (Some(directory), Some(nar_hash)) =
+            (&artifact.secrets_dir, &artifact.secrets_nar_hash)
+        {
+            inputs.push(Self::new(
+                GeneratedInputName::Secrets,
                 directory.path().to_path_buf(),
                 nar_hash.clone(),
             ));
@@ -184,6 +197,7 @@ impl RemoteInputStage {
                     .input_ref(GeneratedInputName::System, &root)
                     .expect("remote input stage always includes system"),
                 deployment_ref: self.input_ref(GeneratedInputName::Deployment, &root),
+                secrets_ref: self.input_ref(GeneratedInputName::Secrets, &root),
             },
         }
     }
