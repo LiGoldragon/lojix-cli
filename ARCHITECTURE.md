@@ -77,7 +77,8 @@ Active deploy tool. The first-generation implementation is archived as
 
 ## Cross-Cutting Context
 
-- project-wide engine context: `~/git/criome/ARCHITECTURE.md`
-- current design source: `~/git/CriomOS/reports/0038-lojix-local-config-and-home-deploy-design.md`
-- workspace registration + work survey:
-  workspace report 123, the fork creation and work survey
+- project-wide engine context: `criome/ARCHITECTURE.md`
+- consumed by: CriomOS, CriomOS-home (the home-deploy stack)
+- replacement deploy stack in progress: `lojix` repo (the `lojix`
+  and `lojix-daemon` binaries, sharing the `signal-lojix` contract);
+  `lojix-cli` is transitional until that replacement lands.
