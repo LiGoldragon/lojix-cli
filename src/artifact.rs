@@ -15,15 +15,7 @@ const HORIZON_FLAKE_TEMPLATE: &str = "{
 }
 ";
 
-const ROUTER_WIFI_SAE_PASSWORDS_FILE: &str = "router-wifi-sae-passwords.sops";
-const SECRETS_FLAKE_TEMPLATE: &str = "{
-  outputs = _: {
-    sopsFiles = {
-      routerWifiSaePasswords = ./router-wifi-sae-passwords.sops;
-    };
-  };
-}
-";
+const SOPS_FILE_EXTENSION: &str = "sops";
 
 struct NixSystemName(&'static str);
 
@@ -149,11 +141,10 @@ impl SecretsDir {
     }
 
     fn write(&self, source: &ClusterSecrets) -> Result<()> {
-        std::fs::copy(
-            source.router_wifi_sae_passwords_file(),
-            self.0.join(ROUTER_WIFI_SAE_PASSWORDS_FILE),
-        )?;
-        std::fs::write(self.0.join("flake.nix"), SECRETS_FLAKE_TEMPLATE)?;
+        for entry in source.entries() {
+            std::fs::copy(&entry.source_path, self.0.join(&entry.file_name))?;
+        }
+        std::fs::write(self.0.join("flake.nix"), source.flake_text())?;
         Ok(())
     }
 
@@ -167,20 +158,72 @@ impl SecretsDir {
 }
 
 struct ClusterSecrets {
-    root: PathBuf,
+    entries: Vec<SecretEntry>,
+}
+
+struct SecretEntry {
+    /// SecretReference name as authored in the datom (e.g.
+    /// "router-wifi-sae-passwords"). Used as the attrset key in the
+    /// generated `sopsFiles` flake output, and matches the lookup
+    /// the consumer module performs (`sopsFiles.${name}`).
+    secret_name: String,
+    /// Filename inside the staged secrets directory (e.g.
+    /// "router-wifi-sae-passwords.sops"). The on-disk basename
+    /// matches `<secret_name>.sops` by convention.
+    file_name: String,
+    /// Absolute path to the source `.sops` file in the cluster repo.
+    source_path: PathBuf,
 }
 
 impl ClusterSecrets {
+    /// Scan the cluster repo's `secrets/` directory for every `.sops`
+    /// file. Each file's stem becomes a SecretReference name; the file
+    /// is staged into the generated secrets flake so consumer modules
+    /// can resolve `inputs.secrets.sopsFiles.<name>`. Returns `None`
+    /// when no secrets directory exists or it contains no `.sops`
+    /// files.
     fn from_proposal_source(source: &ProposalSource) -> Option<Self> {
         let root = source.as_path().parent().unwrap_or_else(|| Path::new("."));
-        let candidate = root.join("secrets").join(ROUTER_WIFI_SAE_PASSWORDS_FILE);
-        candidate.exists().then_some(Self { root: root.into() })
+        let secrets_dir = root.join("secrets");
+        let read = std::fs::read_dir(&secrets_dir).ok()?;
+        let mut entries = Vec::new();
+        for item in read.flatten() {
+            let path = item.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(SOPS_FILE_EXTENSION) {
+                continue;
+            }
+            let file_name = path.file_name()?.to_str()?.to_string();
+            let secret_name = path.file_stem()?.to_str()?.to_string();
+            entries.push(SecretEntry {
+                secret_name,
+                file_name,
+                source_path: path,
+            });
+        }
+        if entries.is_empty() {
+            return None;
+        }
+        entries.sort_by(|a, b| a.secret_name.cmp(&b.secret_name));
+        Some(Self { entries })
     }
 
-    fn router_wifi_sae_passwords_file(&self) -> PathBuf {
-        self.root
-            .join("secrets")
-            .join(ROUTER_WIFI_SAE_PASSWORDS_FILE)
+    fn entries(&self) -> &[SecretEntry] {
+        &self.entries
+    }
+
+    /// Generate the `flake.nix` whose `sopsFiles` attrset maps each
+    /// SecretReference name to its staged file. Quoted attr keys
+    /// because SecretReference names use kebab-case.
+    fn flake_text(&self) -> String {
+        let mut body = String::from("{\n  outputs = _: {\n    sopsFiles = {\n");
+        for entry in &self.entries {
+            body.push_str(&format!(
+                "      \"{}\" = ./{};\n",
+                entry.secret_name, entry.file_name,
+            ));
+        }
+        body.push_str("    };\n  };\n}\n");
+        body
     }
 }
 
