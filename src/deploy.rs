@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use horizon_lib::name::{ClusterName, NodeName, UserName};
-use horizon_lib::node::Node;
-use horizon_lib::user::User;
+use horizon_lib::view::{Node, User};
 use horizon_lib::{Horizon, Viewpoint};
 
 use crate::activate::{Activation, HomeActivation, SystemActivation};
@@ -229,18 +228,19 @@ struct CacheEndpoint<'node> {
 
 impl<'node> CacheEndpoint<'node> {
     fn from_node(node: &'node Node) -> Option<Self> {
-        node.nix_url.as_ref()?;
+        node.nix_cache.as_ref()?;
         Some(Self { node })
     }
 
     fn url(&self) -> String {
-        match &self.node.ygg_address {
-            Some(address) => format!("http://[{address}]"),
+        match &self.node.yggdrasil {
+            Some(entry) => format!("http://[{}]", entry.address),
             None => self
                 .node
-                .nix_url
-                .clone()
-                .expect("CacheEndpoint only exists when nix_url exists"),
+                .nix_cache
+                .as_ref()
+                .map(|cache| cache.url.clone())
+                .expect("CacheEndpoint only exists when nix_cache exists"),
         }
     }
 }

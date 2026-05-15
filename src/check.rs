@@ -147,42 +147,39 @@ pub fn diff(horizon: &Horizon, publication: &PublicKeyPublication) -> Report {
         });
     }
 
-    // Yggdrasil. horizon flattens to `ygg_pub_key` + `ygg_address`
-    // (both `Option`); the publication's `yggdrasil` is `Option`.
-    // Three cases: both Some (compare); horizon Some + publication
-    // None (host hasn't run YggdrasilKeypairSetup); horizon None +
-    // publication Some (host has identity goldragon doesn't know
-    // about).
-    let expected_ygg = horizon.node.ygg_pub_key.as_ref();
-    let expected_ygg_address = horizon.node.ygg_address.as_ref();
+    // Yggdrasil. horizon carries a typed `yggdrasil: Option<YggPubKeyEntry>`
+    // (pub_key + address + subnet travel together per step 14); the
+    // publication's `yggdrasil` is `Option`. Three cases: both Some
+    // (compare); horizon Some + publication None (host hasn't run
+    // YggdrasilKeypairSetup); horizon None + publication Some (host
+    // has identity goldragon doesn't know about).
+    let expected_ygg = horizon.node.yggdrasil.as_ref();
     let actual_ygg = publication.yggdrasil.as_ref();
     match (expected_ygg, actual_ygg) {
-        (Some(expected_key), Some(actual)) => {
-            if ygg_pub_key_text(expected_key) != actual.public_key {
+        (Some(expected_entry), Some(actual)) => {
+            if ygg_pub_key_text(&expected_entry.pub_key) != actual.public_key {
                 mismatches.push(Mismatch {
                     concern: "yggdrasil-public-key",
-                    expected: ygg_pub_key_text(expected_key),
+                    expected: ygg_pub_key_text(&expected_entry.pub_key),
                     actual: actual.public_key.clone(),
                     operator_hint:
                         "host's yggdrasil keypair derives a different public key than goldragon expects — either rm the host's yggdrasil keypair file and re-run YggdrasilKeypairSetup + PublicKeyPublicationWriting, or update goldragon",
                 });
             }
-            if let Some(expected_address) = expected_ygg_address
-                && ygg_address_text(expected_address) != actual.address
-            {
+            if ygg_address_text(&expected_entry.address) != actual.address {
                 mismatches.push(Mismatch {
                     concern: "yggdrasil-address",
-                    expected: ygg_address_text(expected_address),
+                    expected: ygg_address_text(&expected_entry.address),
                     actual: actual.address.clone(),
                     operator_hint:
                         "yggdrasil address mismatch (typically follows a public-key mismatch)",
                 });
             }
         }
-        (Some(expected_key), None) => {
+        (Some(expected_entry), None) => {
             mismatches.push(Mismatch {
                 concern: "yggdrasil-public-key",
-                expected: ygg_pub_key_text(expected_key),
+                expected: ygg_pub_key_text(&expected_entry.pub_key),
                 actual: "<absent in publication>".to_string(),
                 operator_hint:
                     "goldragon declares a yggdrasil identity for this host but the publication has none — run clavifaber's YggdrasilKeypairSetup + PublicKeyPublicationWriting on the host",

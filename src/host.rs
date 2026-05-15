@@ -1,5 +1,5 @@
 use horizon_lib::name::{CriomeDomainName, UserName};
-use horizon_lib::node::Node;
+use horizon_lib::view::Node;
 
 use crate::process::{ProcessInvocation, ShellCommand};
 

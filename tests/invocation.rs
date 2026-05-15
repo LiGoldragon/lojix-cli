@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use horizon_lib::name::{ClusterName, CriomeDomainName, NodeName, UserName};
+use horizon_lib::name::{ClusterDomain, ClusterName, CriomeDomainName, NodeName, UserName};
 use horizon_lib::species::System;
 
 use lojix_cli::activate::{BootEntry, HomeActivation, SystemActivation, SystemProfileLink};
@@ -23,7 +23,8 @@ use lojix_cli::stage::{
 fn target_for(node: &str, cluster: &str) -> SshTarget {
     let node = NodeName::try_new(node).unwrap();
     let cluster = ClusterName::try_new(cluster).unwrap();
-    let domain = CriomeDomainName::for_node(&node, &cluster);
+    let cluster_domain = ClusterDomain::try_new("criome").unwrap();
+    let domain = CriomeDomainName::for_node(&node, &cluster, &cluster_domain);
     SshTarget::from_criome_domain(&domain)
 }
 

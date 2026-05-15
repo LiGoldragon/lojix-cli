@@ -11,15 +11,14 @@
 use std::collections::BTreeMap;
 
 use horizon_lib::address::{YggAddress, YggSubnet};
-use horizon_lib::io::Io;
-use horizon_lib::machine::Machine;
 use horizon_lib::magnitude::Magnitude;
-use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::name::{ClusterDomain, ClusterName, NodeName};
 use horizon_lib::proposal::{
-    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, NodeServices, YggPubKeyEntry,
+    ClusterProposal, ClusterTrust, Io, Machine, NodePlacement, NodeProposal, NodePubKeys,
+    NodeServices, YggPubKeyEntry,
 };
 use horizon_lib::pub_key::{NixPubKey, SshPubKey, YggPubKey};
-use horizon_lib::species::{Arch, Bootloader, Keyboard, MachineSpecies, NodeSpecies};
+use horizon_lib::species::{Arch, Bootloader, Keyboard, NodeSpecies};
 use horizon_lib::{Horizon, Viewpoint};
 
 use lojix_cli::build::ExtraSubstituters;
@@ -37,13 +36,10 @@ fn cluster_name() -> ClusterName {
 
 fn machine() -> Machine {
     Machine {
-        species: MachineSpecies::Metal,
         arch: Some(Arch::X86_64),
         cores: 4,
         model: None,
         mother_board: None,
-        super_node: None,
-        super_user: None,
         chip_gen: None,
         ram_gb: None,
     }
@@ -90,6 +86,7 @@ fn node_proposal(species: NodeSpecies, size: Magnitude, nix: bool, ygg: bool) ->
         online: None,
         number_of_build_cores: None,
         services: NodeServices::default(),
+        placement: NodePlacement::Metal {},
     }
 }
 
@@ -116,6 +113,14 @@ fn projected_horizon() -> Horizon {
             nodes: BTreeMap::new(),
             users: BTreeMap::new(),
         },
+        secret_bindings: Vec::new(),
+        lan: None,
+        resolver: None,
+        tailnet: None,
+        ai_providers: Vec::new(),
+        vpn_profiles: Vec::new(),
+        domain: ClusterDomain::try_new("criome").unwrap(),
+        public_domain: "criome.net".to_string(),
     }
     .project(&Viewpoint {
         cluster: cluster_name(),
@@ -144,7 +149,7 @@ fn substituter_resolution_falls_back_to_nix_url_without_ygg_endpoint() {
         .ex_nodes
         .get_mut(&node_name("prometheus"))
         .unwrap()
-        .ygg_address = None;
+        .yggdrasil = None;
 
     let substituters =
         ExtraSubstituters::from_horizon_nodes(&horizon, &[node_name("prometheus")]).unwrap();

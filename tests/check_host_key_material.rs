@@ -21,15 +21,14 @@ use std::collections::BTreeMap;
 use clavifaber::publication::PublicKeyPublication;
 use clavifaber::yggdrasil::YggdrasilProjection;
 use horizon_lib::address::{YggAddress, YggSubnet};
-use horizon_lib::io::Io;
-use horizon_lib::machine::Machine;
 use horizon_lib::magnitude::Magnitude;
-use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::name::{ClusterDomain, ClusterName, NodeName};
 use horizon_lib::proposal::{
-    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, NodeServices, YggPubKeyEntry,
+    ClusterProposal, ClusterTrust, Io, Machine, NodePlacement, NodeProposal, NodePubKeys,
+    NodeServices, YggPubKeyEntry,
 };
 use horizon_lib::pub_key::{SshPubKey, YggPubKey};
-use horizon_lib::species::{Arch, Bootloader, Keyboard, MachineSpecies, NodeSpecies};
+use horizon_lib::species::{Arch, Bootloader, Keyboard, NodeSpecies};
 use horizon_lib::{Horizon, Viewpoint};
 
 use lojix_cli::check::diff;
@@ -43,13 +42,10 @@ fn ygg_key() -> String {
 
 fn machine() -> Machine {
     Machine {
-        species: MachineSpecies::Metal,
         arch: Some(Arch::X86_64),
         cores: 4,
         model: None,
         mother_board: None,
-        super_node: None,
-        super_user: None,
         chip_gen: None,
         ram_gb: None,
     }
@@ -88,6 +84,7 @@ fn node_proposal_with_keys(ssh: &str, yggdrasil: Option<YggPubKeyEntry>) -> Node
         online: None,
         number_of_build_cores: None,
         services: NodeServices::default(),
+        placement: NodePlacement::Metal {},
     }
 }
 
@@ -106,6 +103,14 @@ fn horizon_for(ssh: &str, yggdrasil: Option<YggPubKeyEntry>) -> Horizon {
             nodes: BTreeMap::new(),
             users: BTreeMap::new(),
         },
+        secret_bindings: Vec::new(),
+        lan: None,
+        resolver: None,
+        tailnet: None,
+        ai_providers: Vec::new(),
+        vpn_profiles: Vec::new(),
+        domain: ClusterDomain::try_new("criome").unwrap(),
+        public_domain: "criome.net".to_string(),
     }
     .project(&Viewpoint {
         cluster,
