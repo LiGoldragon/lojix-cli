@@ -11,7 +11,7 @@ name = "lojix-cli"
 path = "src/main.rs"
 
 [dependencies]
-horizon-lib = { git = "https://github.com/LiGoldragon/horizon-rs" }
+horizon-lib = { git = "https://github.com/LiGoldragon/horizon-rs", branch = "horizon-re-engineering" }
 nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git" }
 clavifaber  = { git = "https://github.com/LiGoldragon/clavifaber.git" }
 tokio       = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util"] }
