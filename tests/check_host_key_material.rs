@@ -26,7 +26,7 @@ use horizon_lib::machine::Machine;
 use horizon_lib::magnitude::Magnitude;
 use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::proposal::{
-    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, NodeServices, YggPubKeyEntry,
+    ClusterProposal, ClusterTrust, NodeProposal, NodePubKeys, YggPubKeyEntry,
 };
 use horizon_lib::pub_key::{SshPubKey, YggPubKey};
 use horizon_lib::species::{Arch, Bootloader, Keyboard, MachineSpecies, NodeSpecies};
@@ -86,8 +86,7 @@ fn node_proposal_with_keys(ssh: &str, yggdrasil: Option<YggPubKeyEntry>) -> Node
         wants_hw_video_accel: false,
         router_interfaces: None,
         online: None,
-        number_of_build_cores: None,
-        services: NodeServices::default(),
+        services: Vec::new(),
     }
 }
 
