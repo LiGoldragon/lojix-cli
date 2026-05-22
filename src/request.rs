@@ -133,8 +133,8 @@ impl NotaDecode for LojixRequest {
             "CheckHostKeyMaterial" => Ok(Self::CheckHostKeyMaterial(CheckHostKeyMaterial::decode(
                 decoder,
             )?)),
-            other => Err(nota_codec::Error::UnknownKindForVerb {
-                verb: "LojixRequest",
+            other => Err(nota_codec::Error::UnknownVariant {
+                enum_name: "LojixRequest",
                 got: other.to_string(),
             }),
         }
