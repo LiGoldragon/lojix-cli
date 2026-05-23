@@ -32,7 +32,7 @@ The current implementation supports:
 Run an inline Nota request:
 
 ```sh
-lojix-cli '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)'
+lojix-cli '(FullOs goldragon ouranos [./datom.nota] [github:LiGoldragon/CriomOS/main] BootOnce None None)'
 ```
 
 Run a request file:
@@ -50,7 +50,7 @@ lojix-cli
 Run from this repo without installing:
 
 ```sh
-nix run .# -- '(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS-home/main" Profile None)'
+nix run .# -- '(HomeOnly goldragon ouranos li [./datom.nota] [github:LiGoldragon/CriomOS-home/main] Profile None None)'
 ```
 
 The `--` in the last command belongs to `nix run`; it is not a
@@ -104,7 +104,7 @@ Fields:
 | `action` | System action for `FullOs` and `OsOnly`. |
 | `mode` | Home action for `HomeOnly`. |
 | `builder?` | Optional builder node. Use `None`, omit it, or provide a node name. |
-| `substituters?` | Optional list of horizon node names whose Nix cache endpoints should be injected into the build as `extra-substituters`. To specify substituters while leaving the builder unset, write `None [ prometheus ]`. |
+| `substituters?` | Optional list of horizon node names whose Nix cache endpoints should be injected into the build as `extra-substituters`. To specify substituters while leaving the builder unset, write `None (Some [prometheus])`. |
 
 System actions:
 
@@ -128,11 +128,11 @@ Home modes:
 Examples:
 
 ```nota
-(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" BootOnce None)
-(OsOnly goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Build prom)
-(HomeOnly goldragon ouranos li "./datom.nota" "github:LiGoldragon/CriomOS-home/main" Profile None)
-(FullOs goldragon zeus "./datom.nota" "github:LiGoldragon/CriomOS/main" Boot zeus [ prometheus ])
-(FullOs goldragon zeus "./datom.nota" "github:LiGoldragon/CriomOS/main" Boot None [ prometheus ])
+(FullOs goldragon ouranos [./datom.nota] [github:LiGoldragon/CriomOS/main] BootOnce None None)
+(OsOnly goldragon ouranos [./datom.nota] [github:LiGoldragon/CriomOS/main] Build (Some prom) None)
+(HomeOnly goldragon ouranos li [./datom.nota] [github:LiGoldragon/CriomOS-home/main] Profile None None)
+(FullOs goldragon zeus [./datom.nota] [github:LiGoldragon/CriomOS/main] Boot (Some zeus) (Some [prometheus]))
+(FullOs goldragon zeus [./datom.nota] [github:LiGoldragon/CriomOS/main] Boot None (Some [prometheus]))
 ```
 
 All deploy kinds validate a requested builder against the projected
@@ -366,7 +366,7 @@ Build or run through Nix:
 
 ```sh
 nix build .#
-nix run .# -- '(FullOs goldragon ouranos "./datom.nota" "github:LiGoldragon/CriomOS/main" Eval None)'
+nix run .# -- '(FullOs goldragon ouranos [./datom.nota] [github:LiGoldragon/CriomOS/main] Eval None None)'
 ```
 
 Repository-specific process and style rules live in `AGENTS.md`.

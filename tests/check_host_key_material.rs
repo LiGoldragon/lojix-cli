@@ -171,9 +171,11 @@ fn mismatch_when_horizon_expects_yggdrasil_but_publication_has_none() {
     let report = diff(&horizon, &pub_);
     assert_eq!(report.mismatches.len(), 1);
     assert_eq!(report.mismatches[0].concern, "yggdrasil-public-key");
-    assert!(report.mismatches[0]
-        .actual
-        .contains("absent in publication"));
+    assert!(
+        report.mismatches[0]
+            .actual
+            .contains("absent in publication")
+    );
 }
 
 #[test]
@@ -183,9 +185,11 @@ fn mismatch_when_publication_has_yggdrasil_not_in_horizon() {
     let report = diff(&horizon, &pub_);
     assert_eq!(report.mismatches.len(), 1);
     assert_eq!(report.mismatches[0].concern, "yggdrasil-public-key");
-    assert!(report.mismatches[0]
-        .expected
-        .contains("absent in goldragon"));
+    assert!(
+        report.mismatches[0]
+            .expected
+            .contains("absent in goldragon")
+    );
 }
 
 #[test]

@@ -98,8 +98,8 @@ fn eval_request_arguments() -> Vec<String> {
         "(FullOs".to_string(),
         "goldragon".to_string(),
         "tiger".to_string(),
-        format!("\"{GOLDRAGON_NOTA}\""),
-        format!("\"{CRIOMOS_PATH}\""),
+        format!("[{GOLDRAGON_NOTA}]"),
+        format!("[{CRIOMOS_PATH}]"),
         "Eval".to_string(),
         "None)".to_string(),
     ]

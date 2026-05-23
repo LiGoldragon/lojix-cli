@@ -1,12 +1,12 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use horizon_lib::name::{NodeName, UserName};
 use crate::build::{HomeMode, SystemAction};
 use crate::cluster::StorePath;
 use crate::error::{Error, Result};
 use crate::host::SshTarget;
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun, ShellArgument, ShellCommand};
+use horizon_lib::name::{NodeName, UserName};
 
 /// Activate the new closure on the target node.
 ///

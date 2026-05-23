@@ -22,9 +22,18 @@ use std::path::{Path, PathBuf};
 /// Historical literal names that must never re-appear in `src/`.
 /// Each pair is (literal, explanation).
 const FORBIDDEN_LITERALS: &[(&str, &str)] = &[
-    ("\"prometheus\"", "historical node name; use horizon.node.* projection"),
-    ("\"ouranos\"", "historical node name; use horizon.node.* projection"),
-    ("\"goldragon\"", "historical cluster name; use horizon.cluster.name"),
+    (
+        "\"prometheus\"",
+        "historical node name; use horizon.node.* projection",
+    ),
+    (
+        "\"ouranos\"",
+        "historical node name; use horizon.node.* projection",
+    ),
+    (
+        "\"goldragon\"",
+        "historical cluster name; use horizon.cluster.name",
+    ),
     (
         "\"criome\"",
         "historical cluster TLD; use horizon.cluster.tld (added in horizon-rs primary-a70)",

@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use horizon_lib::Horizon;
-use horizon_lib::name::{ClusterName, NodeName};
-use horizon_lib::species::System;
 use crate::build::DeploymentShape;
 use crate::cluster::{FlakeInputRef, NarHashSri, ProposalSource};
 use crate::error::{Error, Result};
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
+use horizon_lib::Horizon;
+use horizon_lib::name::{ClusterName, NodeName};
+use horizon_lib::species::System;
 
 const HORIZON_FLAKE_TEMPLATE: &str = "{
   outputs = _: {
