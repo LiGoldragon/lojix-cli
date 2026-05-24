@@ -82,3 +82,19 @@ Active deploy tool. The first-generation implementation is archived as
 - replacement deploy stack in progress: `lojix` repo (the `lojix`
   and `lojix-daemon` binaries, sharing the `signal-lojix` contract);
   `lojix-cli` is transitional until that replacement lands.
+
+## Pending schema-engine upgrade
+
+**Status:** scheduled for migration to schema-language-based contract per `reports/designer/326-v13-spirit-complete-schema-vision.md` + `reports/designer/324-migration-mvp-spirit-handover-re-specification.md`.
+
+**Target:** as the transitional CLI for the `signal-lojix` contract, this binary's request-construction code converts to use macro-emitted record types from the `lojix/lojix.schema` file consumed by the lojix daemon and contract. The CLI does not own its own schema; it is a client of the contract's schema-emitted types per the triad rule (the daemon is the schema owner; CLI is the daemon's first client).
+
+**Sequence:** per `primary-9up1` migration to current foundation. The replacement `lojix` repo's `lojix` + `lojix-daemon` + `signal-lojix` cutover lands first; once those bind to schema-emitted types, this transitional CLI retires (per the existing "transitional" status). If the transition window extends, this CLI gets a bridging cutover to schema-emitted record-construction code in the interim.
+
+**Per-component concerns:** Transitional. Schema cutover may coincide with retirement rather than mid-life refactor. Per `primary-9up1` migration to current foundation.
+
+**References:**
+- `reports/designer/326-v13-spirit-complete-schema-vision.md` — uniform header form + schema-language design
+- `reports/designer/324-migration-mvp-spirit-handover-re-specification.md` — migration MVP + handover state
+- `reports/designer/322-spirit-mvp-positional-schema-worked-example.md` — Spirit MVP worked example
+- `reports/operator/174-schema-import-header-design-critique-2026-05-24.md` — header/body/feature separation + lowering rules
