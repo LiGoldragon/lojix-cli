@@ -190,6 +190,19 @@ fn nota_request_rejects_trailing_tokens() {
 }
 
 #[test]
+fn nota_request_rejects_quote_delimited_paths() {
+    let error = LojixRequest::from_nota(
+        "(HomeOnly goldragon tiger li \"/tmp/datom.nota\" \"github:LiGoldragon/CriomOS-home/main\" Profile None None)",
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("quotation mark"),
+        "unexpected error: {error}",
+    );
+}
+
+#[test]
 fn system_records_map_to_pipeline_plans() {
     let os_only = OsOnly {
         cluster: cluster_name(),
