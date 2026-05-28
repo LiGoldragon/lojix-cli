@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "horizon-lib"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/horizon-rs#5ce713f01eef88d0e582f6bb72f58e15e06982d2"
+source = "git+https://github.com/LiGoldragon/horizon-rs#bb3e72a17dca14ff8af0e91200165cc094ae67f0"
 dependencies = [
  "ipnet",
  "nota-codec",

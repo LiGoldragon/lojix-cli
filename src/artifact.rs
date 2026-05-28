@@ -16,10 +16,14 @@ const HORIZON_FLAKE_TEMPLATE: &str = "{
 ";
 
 const ROUTER_WIFI_SAE_PASSWORDS_FILE: &str = "router-wifi-sae-passwords.sops";
+const ROUTER_BACKUP_WIFI_PASSWORD_FILE: &str = "router-backup-wifi-password.sops";
+const LOCAL_LLM_API_TOKEN_FILE: &str = "local-llm-api-token.sops";
 const SECRETS_FLAKE_TEMPLATE: &str = "{
   outputs = _: {
     sopsFiles = {
       routerWifiSaePasswords = ./router-wifi-sae-passwords.sops;
+      routerBackupWifiPassword = ./router-backup-wifi-password.sops;
+      localLlmApiToken = ./local-llm-api-token.sops;
     };
   };
 }
@@ -153,6 +157,14 @@ impl SecretsDir {
             source.router_wifi_sae_passwords_file(),
             self.0.join(ROUTER_WIFI_SAE_PASSWORDS_FILE),
         )?;
+        std::fs::copy(
+            source.router_backup_wifi_password_file(),
+            self.0.join(ROUTER_BACKUP_WIFI_PASSWORD_FILE),
+        )?;
+        std::fs::copy(
+            source.local_llm_api_token_file(),
+            self.0.join(LOCAL_LLM_API_TOKEN_FILE),
+        )?;
         std::fs::write(self.0.join("flake.nix"), SECRETS_FLAKE_TEMPLATE)?;
         Ok(())
     }
@@ -181,6 +193,16 @@ impl ClusterSecrets {
         self.root
             .join("secrets")
             .join(ROUTER_WIFI_SAE_PASSWORDS_FILE)
+    }
+
+    fn router_backup_wifi_password_file(&self) -> PathBuf {
+        self.root
+            .join("secrets")
+            .join(ROUTER_BACKUP_WIFI_PASSWORD_FILE)
+    }
+
+    fn local_llm_api_token_file(&self) -> PathBuf {
+        self.root.join("secrets").join(LOCAL_LLM_API_TOKEN_FILE)
     }
 }
 
