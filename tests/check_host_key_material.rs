@@ -61,6 +61,7 @@ fn io() -> Io {
         bootloader: Bootloader::Uefi,
         disks: BTreeMap::new(),
         swap_devices: Vec::new(),
+        compressed_swap: None,
     }
 }
 

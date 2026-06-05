@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "horizon-lib"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/horizon-rs#bb3e72a17dca14ff8af0e91200165cc094ae67f0"
+source = "git+https://github.com/LiGoldragon/horizon-rs#5cf2e8af3f10cda5f6bc968e258da0c6b1c0426d"
 dependencies = [
  "ipnet",
  "nota-codec",
@@ -665,7 +665,7 @@ dependencies = [
 [[package]]
 name = "nota-derive"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#cde0e8262f2f90afbdf26d9b1b3561376723d816"
+source = "git+https://github.com/LiGoldragon/nota-derive.git?branch=main#11347da1ff4425ff4e743c15a3e3ec322b54ea9a"
 dependencies = [
  "proc-macro2",
  "quote",
