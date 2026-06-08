@@ -17,7 +17,7 @@ use horizon_lib::Horizon;
 use horizon_lib::address::YggAddress;
 use horizon_lib::name::{ClusterName, NodeName};
 use horizon_lib::pub_key::{SshPubKey, YggPubKey};
-use nota_codec::{Decoder, NotaDecode, NotaRecord};
+use nota_next::{NotaDecode, NotaEncode, NotaSource};
 use std::fmt::Write;
 
 use crate::cluster::ProposalSource;
@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 use crate::host::SshTarget;
 use crate::process::{ProcessFailure, ProcessRun, ShellCommand};
 
-#[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
+#[derive(Debug, Clone, PartialEq, Eq, NotaDecode, NotaEncode)]
 pub struct CheckHostKeyMaterial {
     pub cluster: ClusterName,
     pub node: NodeName,
@@ -69,8 +69,7 @@ fn parse_publication(text: &str) -> Result<PublicKeyPublication> {
                 .to_string(),
         ));
     }
-    let mut decoder = Decoder::new(trimmed);
-    let publication = PublicKeyPublication::decode(&mut decoder).map_err(|error| {
+    let publication = NotaSource::new(trimmed).parse().map_err(|error| {
         Error::CheckHostKeyMaterial(format!("decode publication.nota: {error}"))
     })?;
     Ok(publication)

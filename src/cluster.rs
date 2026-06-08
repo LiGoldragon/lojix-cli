@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use horizon_lib::ClusterProposal;
-use nota_codec::{NotaDecode, NotaEncode};
+use nota_next::{Block, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 
 use crate::error::{Error, Result};
 
@@ -19,26 +19,31 @@ impl ProposalSource {
 
     pub fn load(&self) -> Result<ClusterProposal> {
         let bytes = std::fs::read_to_string(&self.0)?;
-        let mut decoder = nota_codec::Decoder::new(&bytes);
-        Ok(<ClusterProposal as nota_codec::NotaDecode>::decode(
-            &mut decoder,
-        )?)
+        Ok(NotaSource::new(&bytes).parse()?)
     }
 }
 
 impl NotaEncode for ProposalSource {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        self.0.display().to_string().encode(encoder)
+    fn to_nota(&self) -> String {
+        self.0.display().to_string().to_nota()
     }
 }
 
 impl NotaDecode for ProposalSource {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        Ok(Self(PathBuf::from(String::decode(decoder)?)))
+    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+        let value = String::from_nota_block(block)?;
+        if value.contains('"') {
+            return Err(NotaDecodeError::InvalidValue {
+                type_name: "ProposalSource",
+                value,
+                reason: "quotation marks are not NOTA string delimiters".to_string(),
+            });
+        }
+        Ok(Self(PathBuf::from(value)))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, nota_codec::NotaTransparent)]
+#[derive(Debug, Clone, PartialEq, Eq, nota_next::NotaEncode)]
 pub struct FlakeRef(String);
 
 impl FlakeRef {
@@ -52,6 +57,20 @@ impl FlakeRef {
 
     pub fn nix_string_literal(&self) -> String {
         format!("\"{}\"", self.0.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+impl NotaDecode for FlakeRef {
+    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+        let value = String::from_nota_block(block)?;
+        if value.contains('"') {
+            return Err(NotaDecodeError::InvalidValue {
+                type_name: "FlakeRef",
+                value,
+                reason: "quotation marks are not NOTA string delimiters".to_string(),
+            });
+        }
+        Ok(Self(value))
     }
 }
 

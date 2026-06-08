@@ -19,7 +19,7 @@ CriomOS.
 - **NOTA is the canonical operator-facing data format.** The CLI
   takes a single NOTA request value (or a request file);
   `lojix-cli '(Build (Cluster goldragon) (Node prometheus))'`.
-  NOTA parsing behaviour belongs to `nota-codec` and `nota-derive`;
+  NOTA parsing behaviour belongs to `nota-next`;
   this CLI evolves request syntax through typed records and
   upstream codec capabilities, not its own parser. Per the
   workspace NOTA discipline (`primary/ESSENCE.md`).

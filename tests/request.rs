@@ -184,7 +184,7 @@ fn nota_request_rejects_trailing_tokens() {
     .unwrap_err();
 
     assert!(
-        error.to_string().contains("end of input"),
+        error.to_string().contains("exactly one NOTA root object"),
         "unexpected error: {error}",
     );
 }

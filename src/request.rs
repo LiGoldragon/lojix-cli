@@ -2,7 +2,10 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use horizon_lib::name::{ClusterName, NodeName, UserName};
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, NotaRecord};
+use nota_next::{
+    Block, Delimiter, NotaBlock, NotaBodyEncode, NotaDecode, NotaDecodeError, NotaEncode,
+    NotaSource,
+};
 
 use crate::build::{BuildPlan, HomeBuildPlan, HomeMode, SystemAction};
 use crate::check::CheckHostKeyMaterial;
@@ -10,7 +13,7 @@ use crate::cluster::{FlakeRef, ProposalSource};
 use crate::deploy::DeployRequest;
 use crate::error::{Error, Result};
 
-#[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
+#[derive(Debug, Clone, PartialEq, Eq, NotaDecode, NotaEncode)]
 pub struct FullOs {
     pub cluster: ClusterName,
     pub node: NodeName,
@@ -21,7 +24,7 @@ pub struct FullOs {
     pub substituters: Option<Vec<NodeName>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
+#[derive(Debug, Clone, PartialEq, Eq, NotaDecode, NotaEncode)]
 pub struct OsOnly {
     pub cluster: ClusterName,
     pub node: NodeName,
@@ -32,7 +35,7 @@ pub struct OsOnly {
     pub substituters: Option<Vec<NodeName>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, NotaRecord)]
+#[derive(Debug, Clone, PartialEq, Eq, NotaDecode, NotaEncode)]
 pub struct HomeOnly {
     pub cluster: ClusterName,
     pub node: NodeName,
@@ -54,16 +57,42 @@ pub enum LojixRequest {
 
 impl LojixRequest {
     pub fn from_nota(text: &str) -> Result<Self> {
-        let mut decoder = Decoder::new(text);
-        let request = Self::decode(&mut decoder)?;
-        if let Some(token) = decoder.peek_token()? {
-            return Err(nota_codec::Error::UnexpectedToken {
-                expected: "end of input",
-                got: token,
-            }
-            .into());
+        Ok(NotaSource::new(text).parse()?)
+    }
+
+    fn from_tagged_children(children: &[Block]) -> std::result::Result<Self, NotaDecodeError> {
+        let Some(tag_block) = children.first() else {
+            return Err(NotaDecodeError::ExpectedRootCount {
+                type_name: "LojixRequest",
+                expected: 1,
+                found: 0,
+            });
+        };
+        let tag = tag_block
+            .demote_to_string()
+            .ok_or(NotaDecodeError::ExpectedAtom {
+                type_name: "LojixRequest variant",
+            })?;
+        let payload = &children[1..];
+        match tag {
+            "FullOs" => Ok(Self::FullOs(FullOs::from_body_objects(payload)?)),
+            "OsOnly" => Ok(Self::OsOnly(OsOnly::from_body_objects(payload)?)),
+            "HomeOnly" => Ok(Self::HomeOnly(HomeOnly::from_body_objects(payload)?)),
+            "CheckHostKeyMaterial" => Ok(Self::CheckHostKeyMaterial(
+                CheckHostKeyMaterial::from_body_objects(payload)?,
+            )),
+            other => Err(NotaDecodeError::UnknownVariant {
+                enum_name: "LojixRequest",
+                variant: other.to_string(),
+            }),
         }
-        Ok(request)
+    }
+
+    fn tagged_payload_to_nota(tag: &'static str, payload: &impl NotaBodyEncode) -> String {
+        let mut fields = Vec::new();
+        fields.push(tag.to_owned());
+        fields.extend(payload.to_nota_body().fields().iter().cloned());
+        Delimiter::Parenthesis.wrap(fields)
     }
 }
 
@@ -113,115 +142,23 @@ impl HomeOnly {
 }
 
 impl NotaEncode for LojixRequest {
-    fn encode(&self, encoder: &mut Encoder) -> nota_codec::Result<()> {
+    fn to_nota(&self) -> String {
         match self {
-            Self::FullOs(request) => {
-                encoder.start_record("FullOs")?;
-                request.cluster.encode(encoder)?;
-                request.node.encode(encoder)?;
-                request.source.encode(encoder)?;
-                request.criomos.encode(encoder)?;
-                request.action.encode(encoder)?;
-                request.builder.encode(encoder)?;
-                request.substituters.encode(encoder)?;
-                encoder.end_record()
-            }
-            Self::OsOnly(request) => {
-                encoder.start_record("OsOnly")?;
-                request.cluster.encode(encoder)?;
-                request.node.encode(encoder)?;
-                request.source.encode(encoder)?;
-                request.criomos.encode(encoder)?;
-                request.action.encode(encoder)?;
-                request.builder.encode(encoder)?;
-                request.substituters.encode(encoder)?;
-                encoder.end_record()
-            }
-            Self::HomeOnly(request) => {
-                encoder.start_record("HomeOnly")?;
-                request.cluster.encode(encoder)?;
-                request.node.encode(encoder)?;
-                request.user.encode(encoder)?;
-                request.source.encode(encoder)?;
-                request.home.encode(encoder)?;
-                request.mode.encode(encoder)?;
-                request.builder.encode(encoder)?;
-                request.substituters.encode(encoder)?;
-                encoder.end_record()
-            }
+            Self::FullOs(request) => Self::tagged_payload_to_nota("FullOs", request),
+            Self::OsOnly(request) => Self::tagged_payload_to_nota("OsOnly", request),
+            Self::HomeOnly(request) => Self::tagged_payload_to_nota("HomeOnly", request),
             Self::CheckHostKeyMaterial(request) => {
-                encoder.start_record("CheckHostKeyMaterial")?;
-                request.cluster.encode(encoder)?;
-                request.node.encode(encoder)?;
-                request.source.encode(encoder)?;
-                encoder.end_record()
+                Self::tagged_payload_to_nota("CheckHostKeyMaterial", request)
             }
         }
     }
 }
 
 impl NotaDecode for LojixRequest {
-    fn decode(decoder: &mut Decoder<'_>) -> nota_codec::Result<Self> {
-        let head = decoder.peek_record_head()?;
-        match head.as_str() {
-            "FullOs" => {
-                decoder.expect_record_head("FullOs")?;
-                let request = FullOs {
-                    cluster: NotaDecode::decode(decoder)?,
-                    node: NotaDecode::decode(decoder)?,
-                    source: NotaDecode::decode(decoder)?,
-                    criomos: NotaDecode::decode(decoder)?,
-                    action: NotaDecode::decode(decoder)?,
-                    builder: NotaDecode::decode(decoder)?,
-                    substituters: NotaDecode::decode(decoder)?,
-                };
-                decoder.expect_record_end()?;
-                Ok(Self::FullOs(request))
-            }
-            "OsOnly" => {
-                decoder.expect_record_head("OsOnly")?;
-                let request = OsOnly {
-                    cluster: NotaDecode::decode(decoder)?,
-                    node: NotaDecode::decode(decoder)?,
-                    source: NotaDecode::decode(decoder)?,
-                    criomos: NotaDecode::decode(decoder)?,
-                    action: NotaDecode::decode(decoder)?,
-                    builder: NotaDecode::decode(decoder)?,
-                    substituters: NotaDecode::decode(decoder)?,
-                };
-                decoder.expect_record_end()?;
-                Ok(Self::OsOnly(request))
-            }
-            "HomeOnly" => {
-                decoder.expect_record_head("HomeOnly")?;
-                let request = HomeOnly {
-                    cluster: NotaDecode::decode(decoder)?,
-                    node: NotaDecode::decode(decoder)?,
-                    user: NotaDecode::decode(decoder)?,
-                    source: NotaDecode::decode(decoder)?,
-                    home: NotaDecode::decode(decoder)?,
-                    mode: NotaDecode::decode(decoder)?,
-                    builder: NotaDecode::decode(decoder)?,
-                    substituters: NotaDecode::decode(decoder)?,
-                };
-                decoder.expect_record_end()?;
-                Ok(Self::HomeOnly(request))
-            }
-            "CheckHostKeyMaterial" => {
-                decoder.expect_record_head("CheckHostKeyMaterial")?;
-                let request = CheckHostKeyMaterial {
-                    cluster: NotaDecode::decode(decoder)?,
-                    node: NotaDecode::decode(decoder)?,
-                    source: NotaDecode::decode(decoder)?,
-                };
-                decoder.expect_record_end()?;
-                Ok(Self::CheckHostKeyMaterial(request))
-            }
-            other => Err(nota_codec::Error::UnknownVariant {
-                enum_name: "LojixRequest",
-                got: other.to_string(),
-            }),
-        }
+    fn from_nota_block(block: &Block) -> std::result::Result<Self, NotaDecodeError> {
+        let children =
+            NotaBlock::new(block).expect_delimited(Delimiter::Parenthesis, "LojixRequest")?;
+        Self::from_tagged_children(children)
     }
 }
 

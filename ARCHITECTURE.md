@@ -66,7 +66,7 @@ What does not live here:
 - Generated deploy inputs are consumed as local `path:` flake refs
   carrying NAR hashes.
 - Nota is the canonical operator-facing data format.
-- Nota parsing behavior belongs to `nota-codec` and `nota-derive`;
+- Nota parsing behavior belongs to `nota-next`;
   lojix-cli evolves request syntax through typed records and upstream
   codec capabilities.
 

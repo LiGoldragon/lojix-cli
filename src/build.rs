@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::host::SshTarget;
 use crate::process::{ProcessFailure, ProcessInvocation, ProcessRun};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_next::NotaDecode, nota_next::NotaEncode)]
 pub enum SystemAction {
     Eval,
     Build,
@@ -35,7 +35,7 @@ impl SystemAction {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_codec::NotaEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, nota_next::NotaDecode, nota_next::NotaEncode)]
 pub enum HomeMode {
     Build,
     Profile,
