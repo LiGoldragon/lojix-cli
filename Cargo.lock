@@ -101,7 +101,7 @@ dependencies = [
 [[package]]
 name = "clavifaber"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/clavifaber.git#28c383018c26a009d18a248d95735394b4ee52b7"
+source = "git+https://github.com/LiGoldragon/clavifaber.git#6ff4a993beab8f98a58a5f10fb05adad6e85fb63"
 dependencies = [
  "base64ct",
  "const-oid",
@@ -516,7 +516,7 @@ dependencies = [
 [[package]]
 name = "horizon-lib"
 version = "0.1.0"
-source = "git+https://github.com/LiGoldragon/horizon-rs#48df4bddccde9b30f77e1916e714b5754d6b002e"
+source = "git+https://github.com/LiGoldragon/horizon-rs#087a3b6dda8f2d28a429fb7096d5054ef0577c00"
 dependencies = [
  "ipnet",
  "nota-next",
@@ -709,8 +709,8 @@ dependencies = [
 
 [[package]]
 name = "nota-next"
-version = "0.3.0"
-source = "git+https://github.com/LiGoldragon/nota-next.git#d466eb25483cbf49d077a109d7f648f8a1af3a1f"
+version = "0.5.0"
+source = "git+https://github.com/LiGoldragon/nota-next.git?branch=main#7426a6a7d60d6e37ac40df4ecc98717af58129f8"
 dependencies = [
  "nota-next-derive",
  "rkyv",
@@ -718,8 +718,8 @@ dependencies = [
 
 [[package]]
 name = "nota-next-derive"
-version = "0.2.0"
-source = "git+https://github.com/LiGoldragon/nota-next.git#d466eb25483cbf49d077a109d7f648f8a1af3a1f"
+version = "0.3.0"
+source = "git+https://github.com/LiGoldragon/nota-next.git?branch=main#7426a6a7d60d6e37ac40df4ecc98717af58129f8"
 dependencies = [
  "proc-macro2",
  "quote",

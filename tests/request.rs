@@ -38,8 +38,8 @@ fn inline_nota_deploy_request_decodes_after_shell_token_join() {
         "(FullOs",
         "goldragon",
         "tiger",
-        "[/tmp/datom.nota]",
-        "[github:LiGoldragon/CriomOS/abc123]",
+        "/tmp/datom.nota",
+        "github:LiGoldragon/CriomOS/abc123",
         "Boot",
         "None",
         "None)",
@@ -66,7 +66,7 @@ fn file_path_nota_os_only_request_decodes() {
     let mut file = NamedTempFile::new().unwrap();
     write!(
         file,
-        "(OsOnly goldragon tiger [/tmp/datom.nota] [github:LiGoldragon/CriomOS/abc123] Build (Some prometheus) None)"
+        "(OsOnly goldragon tiger /tmp/datom.nota github:LiGoldragon/CriomOS/abc123 Build (Some prometheus) None)"
     )
     .unwrap();
 
@@ -90,7 +90,7 @@ fn file_path_nota_os_only_request_decodes() {
 #[test]
 fn system_request_decodes_named_substituters() {
     let request = LojixRequest::from_nota(
-        "(FullOs goldragon zeus [/tmp/datom.nota] [github:LiGoldragon/CriomOS/abc123] Switch (Some zeus) (Some [prometheus]))",
+        "(FullOs goldragon zeus /tmp/datom.nota github:LiGoldragon/CriomOS/abc123 Switch (Some zeus) (Some [prometheus]))",
     )
     .unwrap();
 
@@ -111,7 +111,7 @@ fn system_request_decodes_named_substituters() {
 #[test]
 fn home_only_request_decodes_user_and_mode() {
     let request = LojixRequest::from_nota(
-        "(HomeOnly goldragon tiger li [/tmp/datom.nota] [github:LiGoldragon/CriomOS-home/main] Profile None None)",
+        "(HomeOnly goldragon tiger li /tmp/datom.nota github:LiGoldragon/CriomOS-home/main Profile None None)",
     )
     .unwrap();
 
@@ -133,8 +133,7 @@ fn home_only_request_decodes_user_and_mode() {
 #[test]
 fn check_host_key_material_request_decodes() {
     let request =
-        LojixRequest::from_nota("(CheckHostKeyMaterial goldragon tiger [/tmp/datom.nota])")
-            .unwrap();
+        LojixRequest::from_nota("(CheckHostKeyMaterial goldragon tiger /tmp/datom.nota)").unwrap();
 
     assert_eq!(
         request,
@@ -179,7 +178,7 @@ fn extra_path_arguments_are_rejected() {
 #[test]
 fn nota_request_rejects_trailing_tokens() {
     let error = LojixRequest::from_nota(
-        "(FullOs goldragon tiger [/tmp/datom.nota] [github:LiGoldragon/CriomOS/abc123] Eval None None) trailing",
+        "(FullOs goldragon tiger /tmp/datom.nota github:LiGoldragon/CriomOS/abc123 Eval None None) trailing",
     )
     .unwrap_err();
 

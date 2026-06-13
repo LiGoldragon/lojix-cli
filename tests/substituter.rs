@@ -46,6 +46,9 @@ fn machine() -> Machine {
         super_user: None,
         chip_gen: None,
         ram_gb: None,
+        disk_gb: None,
+        location: None,
+        super_nodes: Vec::new(),
     }
 }
 
