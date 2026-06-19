@@ -4,14 +4,14 @@
   inputs = {
     nixpkgs.url = "github:LiGoldragon/nixpkgs?ref=main";
 
-    fenix.url = "github:nix-community/fenix";
-    fenix.inputs.nixpkgs.follows = "nixpkgs";
-
-    crane.url = "github:ipetkov/crane";
+    rust-build = {
+      url = "github:LiGoldragon/rust-build";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { self, nixpkgs, fenix, crane }:
+    { self, nixpkgs, rust-build }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forSystems = f: nixpkgs.lib.genAttrs systems (s: f s);
@@ -19,12 +19,13 @@
       mkContext = system:
         let
           pkgs = import nixpkgs { inherit system; };
-          toolchain = fenix.packages.${system}.fromToolchainFile {
+          rust = rust-build.lib.${system}.fromToolchainFile pkgs {
             file = ./rust-toolchain.toml;
             sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
           };
-          craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-          src = craneLib.cleanCargoSource ./.;
+
+          inherit (rust) craneLib toolchain;
+          src = rust.cleanCargoSource ./.;
           # No `cargoVendorDir.outputHashes` — per
           # `~/primary/skills/nix-discipline.md` §"Cargo git deps
           # in crane flakes". Crane fetches git deps from
