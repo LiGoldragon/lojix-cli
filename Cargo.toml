@@ -19,3 +19,6 @@ thiserror   = "2"
 tempfile    = "3"
 serde_json  = "1"
 process-wrap = { version = "9.1.0", features = ["tokio1", "process-group", "kill-on-drop"] }
+
+[patch.crates-io]
+kameo = { git = "https://github.com/LiGoldragon/kameo.git", branch = "main" }
