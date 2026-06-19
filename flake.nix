@@ -21,7 +21,7 @@
           pkgs = import nixpkgs { inherit system; };
           rust = rust-build.lib.${system}.fromToolchainFile pkgs {
             file = ./rust-toolchain.toml;
-            sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
+            sha256 = "sha256-mvUGEOHYJpn3ikC5hckneuGixaC+yGrkMM/liDIDgoU=";
           };
 
           inherit (rust) craneLib toolchain;
