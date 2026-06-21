@@ -1,17 +1,15 @@
 # Skill — lojix-cli
 
-*The Nota-native CriomOS deploy CLI. Operator intent enters as
-one Nota record; nothing else.*
+*Archived legacy CriomOS deploy CLI.*
 
 ---
 
 ## What this skill is for
 
-Use this when adding, modifying, or debugging deploy behavior.
-lojix-cli reads one Nota request, projects through horizon-rs,
-materialises override flake inputs, runs `nix`, and optionally
-copies/activates. Architectural shape is in `ARCHITECTURE.md`;
-runtime semantics are in `README.md`.
+Use this only when reading or recovering historical behavior from the
+old monolithic deploy CLI. Do not add new deploy behavior here.
+Active deploy work belongs in `github:LiGoldragon/lojix`,
+`signal-lojix`, and `meta-signal-lojix`.
 
 ---
 

@@ -1,9 +1,13 @@
 # ARCHITECTURE — lojix-cli
 
-This is the CriomOS deploy CLI. It is the Nota-native operator tool for
-projecting a cluster proposal through `horizon-rs`, materializing the
-small generated flake inputs needed for a deploy, and dispatching Nix build /
-activation work locally or through an SSH builder.
+This is the archived legacy CriomOS deploy CLI. It was the Nota-native
+operator tool for projecting a cluster proposal through `horizon-rs`,
+materializing the small generated flake inputs needed for a deploy, and
+dispatching Nix build / activation work locally or through an SSH builder.
+
+The active replacement lives in `github:LiGoldragon/lojix`: the
+`lojix-daemon` service plus the `lojix` and `meta-lojix` thin clients
+speaking `signal-lojix` / `meta-signal-lojix`.
 
 > **Scope.** lojix-cli is explicitly transitional: deploy on today's
 > Nix-based stack while CriomOS is pre-duct-tape. The eventual `Criome`
@@ -72,8 +76,7 @@ What does not live here:
 
 ## Status
 
-Active deploy tool. The first-generation implementation is archived as
-`lojix-archive`.
+Archived. New deploy work belongs in the daemon-based `lojix` stack.
 
 ## Cross-Cutting Context
 
@@ -83,18 +86,8 @@ Active deploy tool. The first-generation implementation is archived as
   and `lojix-daemon` binaries, sharing the `signal-lojix` contract);
   `lojix-cli` is transitional until that replacement lands.
 
-## Pending schema-engine upgrade
+## Retirement
 
-**Status:** scheduled for migration to schema-language-based contract per `reports/designer/326-v13-spirit-complete-schema-vision.md` + `reports/designer/324-migration-mvp-spirit-handover-re-specification.md`.
-
-**Target:** as the transitional CLI for the `signal-lojix` contract, this binary's request-construction code converts to use macro-emitted record types from the `lojix/lojix.schema` file consumed by the lojix daemon and contract. The CLI does not own its own schema; it is a client of the contract's schema-emitted types per the triad rule (the daemon is the schema owner; CLI is the daemon's first client).
-
-**Sequence:** per `primary-9up1` migration to current foundation. The replacement `lojix` repo's `lojix` + `lojix-daemon` + `signal-lojix` cutover lands first; once those bind to schema-emitted types, this transitional CLI retires (per the existing "transitional" status). If the transition window extends, this CLI gets a bridging cutover to schema-emitted record-construction code in the interim.
-
-**Per-component concerns:** Transitional. Schema cutover may coincide with retirement rather than mid-life refactor. Per `primary-9up1` migration to current foundation.
-
-**References:**
-- `reports/designer/326-v13-spirit-complete-schema-vision.md` — uniform header form + schema-language design
-- `reports/designer/324-migration-mvp-spirit-handover-re-specification.md` — migration MVP + handover state
-- `reports/designer/322-spirit-mvp-positional-schema-worked-example.md` — Spirit MVP worked example
-- `reports/operator/174-schema-import-header-design-critique-2026-05-24.md` — header/body/feature separation + lowering rules
+The schema-engine upgrade lands in the replacement `lojix` daemon stack,
+not in this archived CLI. This repo remains only as a historical reference
+for the old monolithic deploy path.
